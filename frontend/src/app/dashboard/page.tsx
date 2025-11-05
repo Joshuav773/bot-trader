@@ -468,18 +468,18 @@ export default function Dashboard() {
               <div className="bg-gradient-to-r from-gray-50 to-white rounded-lg p-3 border border-gray-200">
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">P&L</span>
-                  <span className={`text-lg font-bold ${bt.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {bt.pnl >= 0 ? '+' : ''}${bt.pnl?.toFixed(2)} ({bt.pnl_percentage?.toFixed(2)}%)
+                  <span className={`text-lg font-bold ${(bt.pnl ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {(bt.pnl ?? 0) >= 0 ? '+' : ''}${(bt.pnl ?? 0).toFixed(2)} ({(bt.pnl_percentage ?? 0).toFixed(2)}%)
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-gray-200">
                   <div>
                     <div className="text-xs text-gray-500 mb-0.5">Start</div>
-                    <div className="text-sm font-semibold text-gray-700">${bt.start_portfolio_value?.toFixed(2)}</div>
+                    <div className="text-sm font-semibold text-gray-700">${(bt.start_portfolio_value ?? 0).toFixed(2)}</div>
                   </div>
                   <div>
                     <div className="text-xs text-gray-500 mb-0.5">End</div>
-                    <div className="text-sm font-semibold text-gray-700">${bt.end_portfolio_value?.toFixed(2)}</div>
+                    <div className="text-sm font-semibold text-gray-700">${(bt.end_portfolio_value ?? 0).toFixed(2)}</div>
                   </div>
                 </div>
                 {bt.warnings && bt.warnings.length > 0 && (

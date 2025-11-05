@@ -177,14 +177,14 @@ export default function TrainPage() {
               {loading ? "Training..." : "Train Model"}
             </button>
             <button
-              onClick={predict}
+              onClick={() => predict()}
               disabled={!modelId || loading}
               className="px-6 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 disabled:opacity-50"
             >
               {loading ? "Predicting..." : "Predict"}
             </button>
             <button
-              onClick={promote}
+              onClick={() => promote()}
               disabled={!modelId || loading}
               className="px-6 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50"
             >

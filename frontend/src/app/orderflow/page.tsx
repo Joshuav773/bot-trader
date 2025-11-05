@@ -107,7 +107,7 @@ export default function OrderFlowPage() {
               />
             </div>
             <button
-              onClick={loadOrders}
+              onClick={() => loadOrders()}
               disabled={loading}
               className="px-6 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
             >

@@ -30,7 +30,7 @@ let dataLimitsCache: Record<string, number> | null = null;
  */
 export async function fetchDataLimits(): Promise<Record<string, number>> {
   if (dataLimitsCache) {
-    return dataLimitsCache;
+    return dataLimitsCache as Record<string, number>;
   }
 
   try {
@@ -48,11 +48,11 @@ export async function fetchDataLimits(): Promise<Record<string, number>> {
       },
     });
 
-    if (response.ok) {
-      const data = await response.json();
-      dataLimitsCache = data.limits || getDefaultLimits();
-      return dataLimitsCache;
-    }
+      if (response.ok) {
+        const data = await response.json();
+        dataLimitsCache = data.limits || getDefaultLimits();
+        return dataLimitsCache as Record<string, number>;
+      }
   } catch (error) {
     console.warn("Failed to fetch data limits, using defaults:", error);
   }
