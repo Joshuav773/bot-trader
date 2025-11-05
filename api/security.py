@@ -10,7 +10,8 @@ from api.db import get_session
 from api.models import User
 from config.settings import MASTER_API_TOKEN, JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRES_MIN
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Use PBKDF2-SHA256 to avoid bcrypt backend/version/length issues
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 
 def verify_master_token(x_master_token: str | None = Header(default=None)) -> None:

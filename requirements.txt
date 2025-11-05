@@ -13,9 +13,10 @@ transformers
 torch
 tensorflow
 alpaca-trade-api
-polygon
 sqlmodel
 SQLAlchemy
 psycopg[binary]
 passlib[bcrypt]
 PyJWT
+polygon-api-client
+email-validator
