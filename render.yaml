@@ -6,7 +6,7 @@ services:
     name: bot-trader-api
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    startCommand: python start_server.py
     envVars:
       - key: POLYGON_API_KEY
         sync: false

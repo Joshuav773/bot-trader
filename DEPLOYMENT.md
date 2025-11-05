@@ -56,7 +56,10 @@ git push -u origin main
    - **Root Directory**: Leave empty (root)
    - **Environment**: `Python 3`
    - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `uvicorn api.main:app --host 0.0.0.0 --port $PORT`
+   - **Start Command**: `python start_server.py`
+   
+   **OR** if the above doesn't work, try:
+   - **Start Command**: `python -m uvicorn api.main:app --host 0.0.0.0 --port $PORT`
 6. Click "Advanced" → Add Environment Variables:
 
    ```bash

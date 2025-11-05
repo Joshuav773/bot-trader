@@ -1,3 +1,10 @@
+import os
+import warnings
+
+# Suppress matplotlib warnings during font cache building (happens on first import)
+warnings.filterwarnings("ignore", message=".*font cache.*")
+os.environ["MPLBACKEND"] = "Agg"  # Use non-interactive backend to avoid GUI issues
+
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
