@@ -1,91 +1,84 @@
 # Deployment Guide
 
-## Frontend Deployment (Vercel)
+Complete guide to deploy Bot Trader to production using free services.
 
-The Next.js frontend can be deployed to Vercel easily.
+## Architecture
 
-### Option 1: Deploy via Vercel CLI
+- **Frontend**: Next.js on Vercel (free tier)
+- **Backend**: FastAPI on Render (free tier)
+- **Database**: PostgreSQL on Neon (free tier)
 
-1. **Install Vercel CLI** (if not already installed):
-   ```bash
-   npm install -g vercel
-   ```
+## Prerequisites
 
-2. **Login to Vercel**:
-   ```bash
-   vercel login
-   ```
+1. GitHub account (free)
+2. Vercel account (free)
+3. Render account (free)
+4. Neon account (free)
+5. Polygon.io API key
 
-3. **Deploy from frontend directory**:
-   ```bash
-   cd frontend
-   vercel
-   ```
+## Step 1: Push Code to GitHub
 
-4. **Follow the prompts**:
-   - Link to existing project or create new
-   - Set environment variables (see below)
+```bash
+# Initialize git (if not already done)
+git init
+git add .
+git commit -m "Initial commit"
 
-### Option 2: Deploy via Vercel Dashboard
-
-1. **Push code to GitHub** (if not already):
-   ```bash
-   git add .
-   git commit -m "Prepare for deployment"
-   git push origin main
-   ```
-
-2. **Go to [vercel.com](https://vercel.com)** and:
-   - Click "New Project"
-   - Import your GitHub repository
-   - Set **Root Directory** to `frontend`
-   - Configure environment variables (see below)
-
-### Environment Variables for Frontend
-
-Set these in Vercel Dashboard → Project Settings → Environment Variables:
-
-```
-NEXT_PUBLIC_API_URL=https://your-backend-url.com
+# Create GitHub repo, then:
+git remote add origin https://github.com/YOUR_USERNAME/bot-trader.git
+git branch -M main
+git push -u origin main
 ```
 
-**Important**: Replace `your-backend-url.com` with your actual backend deployment URL.
+## Step 2: Setup Database (Neon)
 
-### Build Settings
+1. Go to https://neon.tech and sign up
+2. Click "Create Project"
+3. Choose a name (e.g., `bot-trader-db`)
+4. Select region closest to you
+5. Click "Create Project"
+6. Copy the connection string (looks like):
+   ```
+   postgresql://user:password@ep-xxx.us-east-2.aws.neon.tech/dbname
+   ```
+   **Save this for Step 3**
 
-- **Framework Preset**: Next.js
-- **Root Directory**: `frontend`
-- **Build Command**: `npm run build` (auto-detected)
-- **Output Directory**: `.next` (auto-detected)
-- **Install Command**: `npm install` (auto-detected)
+## Step 3: Deploy Backend (Render)
 
-## Backend Deployment
-
-The FastAPI backend needs to be deployed separately. Recommended options:
-
-### Option 1: Render (Recommended)
-
-1. **Create account at [render.com](https://render.com)**
-
-2. **Create new Web Service**:
-   - Connect your GitHub repository
-   - **Root Directory**: (leave empty, or set to project root)
-   - **Environment**: Python 3
+1. Go to https://render.com and sign up
+2. Click "New +" → "Web Service"
+3. Connect your GitHub account (if not connected)
+4. Select your `bot-trader` repository
+5. Configure service:
+   - **Name**: `bot-trader-api`
+   - **Region**: Choose closest to you
+   - **Branch**: `main`
+   - **Root Directory**: Leave empty (root)
+   - **Environment**: `Python 3`
    - **Build Command**: `pip install -r requirements.txt`
    - **Start Command**: `uvicorn api.main:app --host 0.0.0.0 --port $PORT`
+6. Click "Advanced" → Add Environment Variables:
 
-3. **Set Environment Variables**:
-   ```
-   POLYGON_API_KEY=your_key
-   ALPACA_API_KEY=your_key
-   ALPACA_SECRET_KEY=your_secret
-   DATABASE_URL=your_neon_postgres_url
-   JWT_SECRET=your_secret_key
+   ```bash
+   # API Keys
+   POLYGON_API_KEY=your_polygon_key_here
+   
+   # Database (from Neon Step 2)
+   DATABASE_URL=postgresql://user:password@ep-xxx.us-east-2.aws.neon.tech/dbname
+   
+   # JWT Security
+   JWT_SECRET=generate-random-string-here-use-openssl-rand-hex-32
    JWT_ALGORITHM=HS256
    JWT_EXPIRES_MIN=60
-   CORS_ALLOW_ORIGINS=https://your-vercel-frontend.vercel.app
+   
+   # CORS (will update after frontend deploy)
+   CORS_ALLOW_ORIGINS=http://localhost:3000
+   
+   # Admin Account
    ADMIN_EMAIL=admin@example.com
-   ADMIN_PASSWORD=YourPassword123
+   ADMIN_PASSWORD=YourSecurePassword123
+   
+   # Polygon Data Limits (days)
    POLYGON_LIMIT_5M=30
    POLYGON_LIMIT_15M=60
    POLYGON_LIMIT_30M=90
@@ -94,120 +87,141 @@ The FastAPI backend needs to be deployed separately. Recommended options:
    POLYGON_LIMIT_1D=3650
    ```
 
-4. **Update Frontend Environment Variable**:
-   - In Vercel, set `NEXT_PUBLIC_API_URL` to your Render backend URL
+7. Click "Create Web Service"
+8. Wait for deployment (5-10 minutes)
+9. Copy your service URL: `https://bot-trader-api.onrender.com`
+   **Save this for Step 4**
 
-### Option 2: Fly.io
+## Step 4: Deploy Frontend (Vercel)
 
-1. **Install Fly CLI**:
-   ```bash
-   curl -L https://fly.io/install.sh | sh
+1. Go to https://vercel.com and sign up
+2. Click "Add New" → "Project"
+3. Import your GitHub repository `bot-trader`
+4. Configure project:
+   - **Framework Preset**: Next.js (auto-detected)
+   - **Root Directory**: `frontend`
+   - **Build Command**: `npm run build` (auto)
+   - **Output Directory**: `.next` (auto)
+5. Add Environment Variable:
    ```
-
-2. **Login**:
-   ```bash
-   fly auth login
+   NEXT_PUBLIC_API_URL=https://bot-trader-api.onrender.com
    ```
+   (Use your actual Render backend URL from Step 3)
+6. Click "Deploy"
+7. Wait for deployment (2-3 minutes)
+8. Copy your Vercel URL: `https://your-app.vercel.app`
+   **Save this for Step 5**
 
-3. **Create app**:
-   ```bash
-   fly launch
+## Step 5: Connect Frontend to Backend
+
+1. Go back to Render dashboard
+2. Click on your `bot-trader-api` service
+3. Go to "Environment" tab
+4. Edit `CORS_ALLOW_ORIGINS`:
    ```
-
-4. **Create `fly.toml`** (see below)
-
-5. **Deploy**:
-   ```bash
-   fly deploy
+   http://localhost:3000,https://your-app.vercel.app
    ```
+   (Replace with your actual Vercel URL)
+5. Render will automatically redeploy
+6. Wait for redeploy to complete (~2 minutes)
 
-### Option 3: Railway
+## Step 6: Verify Deployment
 
-1. **Create account at [railway.app](https://railway.app)**
-
-2. **New Project** → **Deploy from GitHub**
-
-3. **Add environment variables** (same as Render)
-
-4. **Set start command**: `uvicorn api.main:app --host 0.0.0.0 --port $PORT`
-
-## Quick Deploy Script
-
-For Render deployment, create this file:
-
-### `render.yaml` (for Render)
-
-```yaml
-services:
-  - type: web
-    name: bot-trader-api
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
-    envVars:
-      - key: POLYGON_API_KEY
-        sync: false
-      - key: DATABASE_URL
-        sync: false
-      - key: JWT_SECRET
-        generateValue: true
-      - key: CORS_ALLOW_ORIGINS
-        value: https://your-frontend.vercel.app
-```
-
-## Deployment Checklist
-
-### Before Deploying Frontend:
-- [ ] Set `NEXT_PUBLIC_API_URL` in Vercel environment variables
-- [ ] Ensure backend is deployed and accessible
-- [ ] Test API connectivity from frontend
-
-### Before Deploying Backend:
-- [ ] All API keys configured (Polygon, Alpaca)
-- [ ] Database URL configured (Neon PostgreSQL)
-- [ ] CORS origins include your frontend URL
-- [ ] JWT secret set (use strong random string)
-- [ ] Admin credentials configured
-
-### After Deployment:
-- [ ] Test login functionality
-- [ ] Test API endpoints
-- [ ] Verify CORS is working
-- [ ] Check backend logs for errors
-- [ ] Test a backtest to ensure everything works
+1. Visit your Vercel URL: `https://your-app.vercel.app`
+2. You should see the login page
+3. Login with:
+   - Email: Your `ADMIN_EMAIL` from Step 3
+   - Password: Your `ADMIN_PASSWORD` from Step 3
+4. Test features:
+   - Dashboard loads
+   - Chart displays data
+   - Backtest runs successfully
 
 ## Troubleshooting
 
-### Frontend can't connect to backend:
-- Check `NEXT_PUBLIC_API_URL` is set correctly
-- Verify backend is deployed and running
-- Check CORS settings in backend
+### Backend Issues
+
+**Service won't start:**
+- Check Render logs: Service → "Logs" tab
+- Verify all environment variables are set
+- Check `DATABASE_URL` format is correct
+
+**Database connection errors:**
+- Verify Neon connection string is correct
+- Check Neon dashboard for connection status
+- Ensure database is not paused (Neon free tier pauses after inactivity)
+
+**CORS errors:**
+- Verify `CORS_ALLOW_ORIGINS` includes your Vercel URL
+- Check for typos in the URL
+- Wait for Render to finish redeploying
+
+### Frontend Issues
+
+**Can't connect to backend:**
+- Verify `NEXT_PUBLIC_API_URL` is set correctly
+- Check backend is running (visit Render service URL)
 - Check browser console for errors
 
-### Backend won't start:
-- Check all environment variables are set
-- Verify database connection
-- Check logs for missing dependencies
-- Ensure port is set correctly (use `$PORT` for cloud platforms)
+**Build fails:**
+- Check Vercel build logs
+- Ensure all dependencies are in `package.json`
+- Verify TypeScript types are installed
 
-### CORS errors:
-- Add frontend URL to `CORS_ALLOW_ORIGINS` in backend
-- Include protocol (https://)
-- No trailing slashes
+### Database Issues
 
-## Production Considerations
+**Neon database paused:**
+- Free tier pauses after 1 week of inactivity
+- Visit Neon dashboard to resume
+- Connection will work automatically once resumed
 
-1. **Use HTTPS** for all deployments
-2. **Set strong JWT_SECRET** (use random generator)
-3. **Enable database backups** (Neon provides this)
-4. **Monitor logs** for errors
-5. **Set up alerts** for downtime
-6. **Use environment-specific configs** (dev/staging/prod)
+## Environment Variables Reference
 
-## Cost Estimates
+### Backend (Render)
 
-- **Vercel**: Free tier available (Frontend)
-- **Render**: Free tier available (Backend)
-- **Neon**: Free tier available (Database)
-- **Total**: Can run on free tiers for development/testing
+| Variable | Example | Required |
+|----------|---------|----------|
+| `POLYGON_API_KEY` | `pk_test_123...` | Yes |
+| `DATABASE_URL` | `postgresql://...` | Yes |
+| `JWT_SECRET` | Random string | Yes |
+| `JWT_ALGORITHM` | `HS256` | Yes |
+| `JWT_EXPIRES_MIN` | `60` | Yes |
+| `CORS_ALLOW_ORIGINS` | `http://localhost:3000,https://app.vercel.app` | Yes |
+| `ADMIN_EMAIL` | `admin@example.com` | Yes |
+| `ADMIN_PASSWORD` | `SecurePass123` | Yes |
+| `POLYGON_LIMIT_*` | `30`, `60`, `90`, `730`, `3650` | No (defaults provided) |
+
+### Frontend (Vercel)
+
+| Variable | Example | Required |
+|----------|---------|----------|
+| `NEXT_PUBLIC_API_URL` | `https://bot-trader-api.onrender.com` | Yes |
+
+## Cost
+
+All services used are **free tier**:
+- **Vercel**: Free for hobby projects
+- **Render**: Free tier (may spin down after inactivity)
+- **Neon**: Free tier (pauses after 1 week inactivity, auto-resumes)
+
+For production use, consider upgrading to paid tiers for:
+- Always-on backend (Render)
+- No database pauses (Neon)
+- Higher rate limits
+
+## Local Development
+
+After deployment, you can still develop locally using the scripts in `bash/`:
+
+```bash
+# Start services
+./bash/START_LOCAL.sh      # Backend on port 8000
+./bash/START_FRONTEND.sh   # Frontend on port 3000
+
+# Stop services
+./bash/STOP_BACKEND.sh     # Stop backend
+./bash/STOP_FRONTEND.sh    # Stop frontend
+```
+
+See `SETUP.md` for detailed local setup instructions.
 

@@ -193,6 +193,28 @@ bot-trader/
         └── orderflow/     # Order flow tracker
 ```
 
-## Module Walkthrough
+## Documentation
 
-See `MODULES.md` for detailed explanations of each module's logic and responsibilities.
+- **`SETUP.md`** - First time setup and local development
+- **`DEPLOYMENT.md`** - Deploy to production (Vercel + Render + Neon)
+
+## Advanced Features
+
+### Enhanced Backtesting Engine
+
+- **Risk Metrics**: Sharpe Ratio, Maximum Drawdown, Calmar Ratio, Alpha
+- **Dynamic Slippage**: Volume and volatility-based execution costs
+- **Risk Management**: Drawdown protection, position sizing, ATR-based stops
+- **Enhanced Strategies**: See Enhanced SMA strategy in dashboard
+
+### Position Sizing
+
+- Optimal f (Ralph Vince)
+- Kelly Criterion
+- Risk-based sizing with stop loss distance
+
+### Walk-Forward Analysis
+
+- Out-of-sample validation
+- Rolling window optimization
+- Prevents overfitting
