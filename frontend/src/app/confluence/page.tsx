@@ -273,14 +273,14 @@ export default function ConfluencePage() {
 
               <div className="flex gap-3 pt-4">
                     <button
-                      onClick={runBacktest}
+                      onClick={() => runBacktest()}
                       disabled={loading || optimizing}
                       className="flex-1 px-4 py-3 bg-gradient-to-r from-primary-600 to-primary-700 text-white rounded-lg hover:from-primary-700 hover:to-primary-800 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 shadow-md hover:shadow-lg transition-all font-semibold text-sm"
                     >
                       {loading ? "Running..." : "▶ Run Backtest"}
                     </button>
                     <button
-                      onClick={optimize}
+                      onClick={() => optimize()}
                       disabled={loading || optimizing}
                       className="flex-1 px-4 py-3 bg-gradient-to-r from-gray-600 to-gray-700 text-white rounded-lg hover:from-gray-700 hover:to-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-500 disabled:opacity-50 shadow-md hover:shadow-lg transition-all font-semibold text-sm"
                     >

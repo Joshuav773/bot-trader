@@ -286,7 +286,7 @@ export default function Dashboard() {
                   <option value="5m">5m</option>
                 </select>
                 <button
-                  onClick={load}
+                  onClick={() => load()}
                   disabled={loading}
                   className="px-4 py-2 bg-gradient-to-r from-primary-600 to-primary-700 text-white rounded-lg hover:from-primary-700 hover:to-primary-800 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 shadow-md hover:shadow-lg transition-all font-medium text-sm"
                 >
@@ -455,7 +455,7 @@ export default function Dashboard() {
           </div>
           
           <button
-            onClick={runBacktest}
+            onClick={() => runBacktest()}
             disabled={loading}
             className="w-full px-4 py-3 bg-gradient-to-r from-primary-600 to-primary-700 text-white rounded-lg hover:from-primary-700 hover:to-primary-800 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 shadow-md hover:shadow-lg transition-all font-semibold text-sm"
           >
