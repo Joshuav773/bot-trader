@@ -1,8 +1,6 @@
 import backtrader as bt
 import pandas as pd
-from typing import Type, Dict, Any, Optional, List
-from backtester.metrics import calculate_comprehensive_metrics, StrategyMetrics
-from backtester.cost_model import DynamicSlippage, MarketImpactSlippage, EliteCommission
+from typing import Type, Dict, Any, Optional
 
 
 def run_backtest(

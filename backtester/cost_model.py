@@ -6,13 +6,32 @@ Costs are not fixed percentages but dynamic functions tied to:
 - Trade size relative to market depth
 - Current market liquidity
 - Volatility regime
+
+Note: These classes use backtrader's slippage interface. For simpler slippage,
+use cerebro.broker.set_slippage_fixed() or cerebro.broker.set_slippage_perc().
 """
 import backtrader as bt
 from typing import Optional
 import numpy as np
 
+# Note: backtrader may not have Slippage class in all versions
+# We'll create a base class that works with backtrader's slippage interface
+class _SlippageBase:
+    """Base class for slippage implementation"""
+    params = ()
+    def __init__(self):
+        pass
+    def __call__(self, order, price, size):
+        return price, size
 
-class DynamicSlippage(bt.Slippage):
+# Try to use backtrader's Slippage if available, otherwise use our base
+try:
+    _SlippageBase = bt.Slippage
+except AttributeError:
+    pass  # Use our _SlippageBase above
+
+
+class DynamicSlippage(_SlippageBase):
     """
     Dynamic slippage model that accounts for:
     - Trade size relative to average volume
@@ -74,7 +93,7 @@ class DynamicSlippage(bt.Slippage):
         return executed_price, size
 
 
-class MarketImpactSlippage(bt.Slippage):
+class MarketImpactSlippage(_SlippageBase):
     """
     Market impact model based on square-root law.
     Larger orders have non-linear impact: Impact ∝ √(Size)

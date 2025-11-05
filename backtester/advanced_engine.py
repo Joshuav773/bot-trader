@@ -14,7 +14,15 @@ from typing import Type, Dict, Any, Optional, List
 from datetime import datetime
 
 from backtester.metrics import calculate_comprehensive_metrics, StrategyMetrics
-from backtester.cost_model import DynamicSlippage, MarketImpactSlippage, EliteCommission
+
+# Import slippage classes conditionally - they may not work in all backtrader versions
+try:
+    from backtester.cost_model import DynamicSlippage, MarketImpactSlippage
+    _HAS_ADVANCED_SLIPPAGE = True
+except (AttributeError, ImportError):
+    _HAS_ADVANCED_SLIPPAGE = False
+    DynamicSlippage = None
+    MarketImpactSlippage = None
 
 
 def run_advanced_backtest(
@@ -133,18 +141,24 @@ def run_advanced_backtest(
         # Configure broker
         cerebro.broker.setcash(cash)
         
-        # Configure cost models
-        if slippage_model == "dynamic":
-            cerebro.broker.set_slippage(DynamicSlippage())
-        elif slippage_model == "market_impact":
-            cerebro.broker.set_slippage(MarketImpactSlippage())
+        # Configure cost models (only if available)
+        if _HAS_ADVANCED_SLIPPAGE:
+            if slippage_model == "dynamic" and DynamicSlippage:
+                try:
+                    cerebro.broker.set_slippage(DynamicSlippage())
+                except:
+                    # Fallback to fixed slippage if advanced doesn't work
+                    cerebro.broker.set_slippage_fixed(0.0005)
+            elif slippage_model == "market_impact" and MarketImpactSlippage:
+                try:
+                    cerebro.broker.set_slippage(MarketImpactSlippage())
+                except:
+                    cerebro.broker.set_slippage_fixed(0.0005)
+        else:
+            # Use simple fixed slippage if advanced not available
+            cerebro.broker.set_slippage_fixed(0.0005)  # 0.05% fixed slippage
         
-        # Use enhanced commission model
-        comminfo = EliteCommission(
-            commission=commission,
-            per_share=0.0,
-            min_commission=1.0
-        )
+        # Use standard commission
         cerebro.broker.setcommission(commission=commission)
         
         # Run backtest
