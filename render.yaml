@@ -1,0 +1,43 @@
+# Render.com deployment configuration
+# This makes it super easy to deploy - just connect GitHub and Render uses this file
+
+services:
+  - type: web
+    name: bot-trader-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: POLYGON_API_KEY
+        sync: false
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: JWT_EXPIRES_MIN
+        value: 60
+      - key: CORS_ALLOW_ORIGINS
+        sync: false
+      - key: ADMIN_EMAIL
+        value: admin@example.com
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: POLYGON_LIMIT_5M
+        value: 30
+      - key: POLYGON_LIMIT_15M
+        value: 60
+      - key: POLYGON_LIMIT_30M
+        value: 90
+      - key: POLYGON_LIMIT_1H
+        value: 730
+      - key: POLYGON_LIMIT_4H
+        value: 730
+      - key: POLYGON_LIMIT_1D
+        value: 3650
+
