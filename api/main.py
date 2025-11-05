@@ -34,9 +34,19 @@ app.add_middleware(
 
 
 @app.on_event("startup")
-def on_startup():
-    create_db_and_tables()
-    ensure_single_admin_user()
+async def on_startup():
+    """Startup event - runs after server starts"""
+    try:
+        print("🔄 Initializing database...")
+        create_db_and_tables()
+        print("✓ Database initialized")
+        
+        print("🔄 Ensuring admin user...")
+        ensure_single_admin_user()
+        print("✓ Admin user ready")
+    except Exception as e:
+        print(f"⚠ Warning during startup: {e}")
+        # Don't fail startup if these fail - server can still run
 
 
 app.include_router(auth_router.router, prefix="/auth", tags=["auth"])
@@ -53,3 +63,9 @@ app.include_router(forex_router.router, prefix="/forex", tags=["forex"], depende
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Trading SaaS API"}
+
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint for Render and monitoring"""
+    return {"status": "healthy", "service": "bot-trader-api"}
