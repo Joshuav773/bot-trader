@@ -58,8 +58,7 @@ git push -u origin main
    - **Build Command**: `pip install -r requirements.txt`
    - **Start Command**: `python start_server.py`
    
-   **OR** if the above doesn't work, try:
-   - **Start Command**: `python -m uvicorn api.main:app --host 0.0.0.0 --port $PORT`
+   **Important**: Make sure `PORT` environment variable is set automatically by Render (it should be by default). The script will log if PORT is missing.
 6. Click "Advanced" → Add Environment Variables:
 
    ```bash

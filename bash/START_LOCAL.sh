@@ -3,6 +3,13 @@
 
 cd "$(dirname "$0")/.." || exit
 source .venv/bin/activate 2>/dev/null || echo "⚠ Virtual environment not found. Activate manually: source .venv/bin/activate"
-echo "Starting backend on http://127.0.0.1:8000"
+
+# Set port and host for local development
+export PORT=8000
+export HOST=127.0.0.1
+export ENV=development
+
+echo "Starting backend on http://${HOST}:${PORT}"
+echo "Development mode: Auto-reload enabled"
 echo "Press Ctrl+C to stop"
-uvicorn api.main:app --reload --host 127.0.0.1 --port 8000
+python start_server.py
