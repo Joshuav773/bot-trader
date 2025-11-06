@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Navbar from "@/components/Navbar";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -14,12 +14,17 @@ export default function OrderFlowPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  async function loadOrders() {
+  const loadOrders = useCallback(async () => {
+    const token = localStorage.getItem("bt_jwt");
+    if (!token) {
+      setError("Please login to view order flow data");
+      setOrders([]);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
-      const token = localStorage.getItem("bt_jwt");
-      if (!token) throw new Error("Missing token. Please login.");
       const params = new URLSearchParams({ hours: hours.toString() });
       if (ticker) params.append("ticker", ticker);
       if (orderType) params.append("order_type", orderType);
@@ -27,16 +32,23 @@ export default function OrderFlowPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
+        if (res.status === 401) {
+          setError("Session expired. Please login again.");
+          localStorage.removeItem("bt_jwt");
+          window.location.href = "/";
+          return;
+        }
         const j = await res.json().catch(() => ({}));
         throw new Error(j.detail || `Request failed (${res.status})`);
       }
       setOrders(await res.json());
     } catch (e: any) {
       setError(e.message);
+      setOrders([]);
     } finally {
       setLoading(false);
     }
-  }
+  }, [hours, ticker, orderType]);
 
   async function loadImpact(orderId: number) {
     setError(null);
@@ -57,10 +69,25 @@ export default function OrderFlowPage() {
   }
 
   useEffect(() => {
+    // Check if user is logged in before setting up auto-refresh
+    const token = localStorage.getItem("bt_jwt");
+    if (!token) {
+      setError("Please login to view order flow data");
+      return;
+    }
+
     loadOrders();
-    const interval = setInterval(loadOrders, 60000); // Refresh every 60s
+    const interval = setInterval(() => {
+      // Check token again before each refresh
+      if (!localStorage.getItem("bt_jwt")) {
+        clearInterval(interval);
+        setError("Session expired. Please login again.");
+        return;
+      }
+      loadOrders();
+    }, 60000); // Refresh every 60s
     return () => clearInterval(interval);
-  }, []);
+  }, [loadOrders]); // Re-run when loadOrders changes (which depends on hours, ticker, orderType)
 
   return (
     <div className="min-h-screen bg-gray-50">

@@ -44,14 +44,36 @@ if __name__ == "__main__":
     if reload_enabled:
         print("   Development mode: Auto-reload enabled")
     
+    # Flush output immediately
+    sys.stdout.flush()
+    sys.stderr.flush()
+    
     try:
         import uvicorn
-        # Start the server - this will bind to the port immediately
-        # Use workers=1 for Fly.io to avoid issues
-        # Prepare uvicorn arguments
-        # Use uvicorn.run directly - don't use workers on Fly.io
-        # Workers can cause issues with health checks and port binding
-        print(f"✓ Starting uvicorn server...")
+        import signal
+        import atexit
+        
+        # Register cleanup handlers
+        def cleanup():
+            print("\n🛑 Server shutting down...")
+            sys.stdout.flush()
+        
+        atexit.register(cleanup)
+        
+        def signal_handler(sig, frame):
+            print(f"\n🛑 Received signal {sig}, shutting down gracefully...")
+            sys.exit(0)
+        
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
+        
+        print(f"✓ Starting uvicorn server on {host}:{port}")
+        print(f"   Server will bind immediately - ML libraries load in background")
+        sys.stdout.flush()
+        
+        # Use uvicorn.run() - it will import the app and bind
+        # The health endpoint is registered first in api/main.py, so it should respond quickly
+        # even while TensorFlow loads in the background
         uvicorn.run(
             "api.main:app",
             host=host,
@@ -62,10 +84,18 @@ if __name__ == "__main__":
         )
     except KeyboardInterrupt:
         print("\n🛑 Server stopped by user")
+        sys.stdout.flush()
         sys.exit(0)
+    except ImportError as e:
+        print(f"❌ Import error: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.stderr.flush()
+        sys.exit(1)
     except Exception as e:
         print(f"❌ Failed to start server: {e}")
         import traceback
         traceback.print_exc()
+        sys.stderr.flush()
         sys.exit(1)
 

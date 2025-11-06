@@ -8,7 +8,26 @@ ALPACA_API_KEY = os.getenv("ALPACA_API_KEY")
 ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
 
 MASTER_API_TOKEN = os.getenv("MASTER_API_TOKEN")
-CORS_ALLOW_ORIGINS = [o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip()]
+# CORS origins - provide sensible defaults if not set
+# Handle errors gracefully to prevent app crashes
+try:
+    _cors_origins_str = os.getenv("CORS_ALLOW_ORIGINS", "")
+    if not _cors_origins_str:
+        # Default to localhost + common Vercel pattern if not set
+        _cors_origins_str = "http://localhost:3000,http://127.0.0.1:3000,https://bot-trader-xi.vercel.app"
+        print("⚠ CORS_ALLOW_ORIGINS not set, using defaults")
+    
+    CORS_ALLOW_ORIGINS = [o.strip() for o in _cors_origins_str.split(",") if o.strip()]
+    # Ensure we always have at least localhost for development
+    if not CORS_ALLOW_ORIGINS:
+        CORS_ALLOW_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000", "https://bot-trader-xi.vercel.app"]
+    
+    print(f"✓ CORS origins configured: {len(CORS_ALLOW_ORIGINS)} origin(s)")
+    print(f"   Origins: {CORS_ALLOW_ORIGINS}")
+except Exception as e:
+    print(f"⚠ Warning: Error parsing CORS_ALLOW_ORIGINS: {e}")
+    print("   Using default origins")
+    CORS_ALLOW_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000", "https://bot-trader-xi.vercel.app"]
 
 DATABASE_URL = os.getenv("DATABASE_URL")  # e.g., postgres://user:pass@host/db
 JWT_SECRET = os.getenv("JWT_SECRET", "change-me")

@@ -19,12 +19,6 @@ primary_region = 'iad'
   min_machines_running = 0
   processes = ['app']
   
-  [[http_service.checks]]
-    grace_period = "2m"
-    interval = "30s"
-    method = "GET"
-    timeout = "10s"
-    path = "/health"
 
 [[services]]
   protocol = 'tcp'

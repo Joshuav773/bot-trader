@@ -43,6 +43,8 @@ COPY data_ingestion/ ./data_ingestion/
 COPY analysis_engine/ ./analysis_engine/
 COPY config/ ./config/
 COPY ml_models/ ./ml_models/
+COPY order_flow/ ./order_flow/
+COPY risk_management/ ./risk_management/
 COPY start_server.py ./
 COPY requirements.txt ./
 
