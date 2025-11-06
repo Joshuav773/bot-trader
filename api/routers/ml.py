@@ -71,6 +71,7 @@ class PredictLstmRequest(BaseModel):
 @router.post("/predict/lstm")
 def predict_lstm(req: PredictLstmRequest) -> Dict[str, Any]:
     try:
+        # Lazy import - only load TensorFlow when this endpoint is called
         from tensorflow import keras
 
         filepath = os.path.join(ARTIFACT_DIR, f"{req.model_id}.keras")

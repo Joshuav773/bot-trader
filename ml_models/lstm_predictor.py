@@ -1,13 +1,30 @@
 from typing import Tuple
 import numpy as np
-from tensorflow import keras
-from tensorflow.keras import layers
+
+# Lazy import - TensorFlow only loads when class is instantiated
+_tensorflow_loaded = False
+
+
+def _ensure_tensorflow():
+    """Lazy load TensorFlow - only import when actually needed"""
+    global _tensorflow_loaded
+    if not _tensorflow_loaded:
+        try:
+            from tensorflow import keras
+            from tensorflow.keras import layers
+            _tensorflow_loaded = True
+            return keras, layers
+        except ImportError as e:
+            raise ImportError(f"TensorFlow not available: {e}. Install with: pip install tensorflow-cpu")
 
 
 class LstmPredictor:
     """A minimal LSTM regressor for next-step price prediction."""
 
     def __init__(self, window: int = 50, units: int = 32):
+        # Lazy load TensorFlow only when creating the model
+        keras, layers = _ensure_tensorflow()
+        
         self.window = window
         self.units = units
         self.model = keras.Sequential(
