@@ -35,18 +35,37 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def on_startup():
-    """Startup event - runs after server starts"""
-    try:
-        print("🔄 Initializing database...")
-        create_db_and_tables()
-        print("✓ Database initialized")
-        
-        print("🔄 Ensuring admin user...")
-        ensure_single_admin_user()
-        print("✓ Admin user ready")
-    except Exception as e:
-        print(f"⚠ Warning during startup: {e}")
-        # Don't fail startup if these fail - server can still run
+    """Startup event - runs after server starts (non-blocking)"""
+    import asyncio
+    import sys
+    
+    # Log that server is ready
+    print("=" * 50)
+    print("✅ FastAPI server is ready and listening!")
+    print(f"   Health endpoint ready at /health")
+    print("=" * 50)
+    sys.stdout.flush()  # Ensure logs are flushed immediately
+    
+    async def init_db():
+        """Initialize database in background"""
+        try:
+            print("🔄 Initializing database...")
+            # Run in executor to avoid blocking startup
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, create_db_and_tables)
+            print("✓ Database initialized")
+            
+            print("🔄 Ensuring admin user...")
+            await loop.run_in_executor(None, ensure_single_admin_user)
+            print("✓ Admin user ready")
+        except Exception as e:
+            print(f"⚠ Warning during startup: {e}")
+            import traceback
+            traceback.print_exc()
+            # Don't fail startup if these fail - server can still run
+    
+    # Run DB init in background so server can start immediately
+    asyncio.create_task(init_db())
 
 
 app.include_router(auth_router.router, prefix="/auth", tags=["auth"])
@@ -67,5 +86,9 @@ def read_root():
 
 @app.get("/health")
 def health_check():
-    """Health check endpoint for Render and monitoring"""
+    """Health check endpoint for Fly.io, Render and monitoring - responds immediately"""
+    # Always return healthy - don't check DB to avoid blocking
+    # Server can start even if DB connection fails initially
     return {"status": "healthy", "service": "bot-trader-api"}
+
+

@@ -95,7 +95,14 @@ class ConfluenceStrategy(bt.Strategy):
         
         if not self.news_client:
             try:
-                self.news_client = NewsClient()
+                # For forex pairs, use ForexFactory; for stocks, use Polygon
+                is_forex = (
+                    self.ticker and (
+                        len(self.ticker.replace("C:", "")) == 6 or
+                        "USD" in self.ticker.upper()
+                    )
+                )
+                self.news_client = NewsClient(use_forexfactory=is_forex)
             except Exception:
                 return None
         

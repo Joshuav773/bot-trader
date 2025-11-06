@@ -20,3 +20,5 @@ passlib[bcrypt]
 PyJWT
 polygon-api-client
 email-validator
+beautifulsoup4
+requests

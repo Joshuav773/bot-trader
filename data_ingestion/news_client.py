@@ -1,6 +1,6 @@
 """
 News data client for fetching financial news and sentiment analysis.
-Uses Polygon.io news API and FinBERT for sentiment scoring.
+Uses Polygon.io news API, ForexFactory (for forex), and FinBERT for sentiment scoring.
 """
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
@@ -9,16 +9,39 @@ import json
 from polygon import RESTClient
 from analysis_engine.sentiment_analyzer import SentimentAnalyzer
 from config.settings import POLYGON_API_KEY
+from data_ingestion.forexfactory_client import ForexFactoryClient
 
 
 class NewsClient:
     """Client for fetching and analyzing financial news."""
     
-    def __init__(self, api_key: Optional[str] = POLYGON_API_KEY):
-        if not api_key:
-            raise ValueError("Polygon API key is not set.")
-        self.client = RESTClient(api_key)
+    def __init__(self, api_key: Optional[str] = POLYGON_API_KEY, use_forexfactory: bool = False):
+        self.use_forexfactory = use_forexfactory
         self.sentiment_analyzer = SentimentAnalyzer()
+        
+        # Initialize Polygon client if API key available
+        if api_key:
+            try:
+                self.client = RESTClient(api_key)
+                self.has_polygon = True
+            except:
+                self.client = None
+                self.has_polygon = False
+        else:
+            self.client = None
+            self.has_polygon = False
+        
+        # Initialize ForexFactory client if requested
+        if use_forexfactory:
+            try:
+                self.forexfactory_client = ForexFactoryClient()
+                self.has_forexfactory = True
+            except:
+                self.forexfactory_client = None
+                self.has_forexfactory = False
+        else:
+            self.forexfactory_client = None
+            self.has_forexfactory = False
     
     def get_news_for_ticker(
         self,
@@ -30,8 +53,11 @@ class NewsClient:
         """
         Fetch news articles for a ticker and analyze sentiment.
         
+        For forex pairs (e.g., EURUSD), uses ForexFactory if enabled.
+        For stocks, uses Polygon.io.
+        
         Args:
-            ticker: Stock ticker symbol
+            ticker: Stock ticker symbol or forex pair (e.g., EURUSD)
             start_date: ISO date 'YYYY-MM-DD'
             end_date: ISO date 'YYYY-MM-DD'
             limit: Max articles to fetch
@@ -39,50 +65,74 @@ class NewsClient:
         Returns:
             List of news items with sentiment scores
         """
-        try:
-            # Polygon news API
-            news = self.client.list_ticker_news(ticker=ticker, limit=limit)
-            
-            articles = []
-            start_dt = datetime.fromisoformat(start_date)
-            end_dt = datetime.fromisoformat(end_date)
-            
-            for item in news:
-                # Filter by date range
-                pub_date = item.published_utc
-                if isinstance(pub_date, str):
-                    try:
-                        pub_date = datetime.fromisoformat(pub_date.replace('Z', '+00:00').replace('+00:00', ''))
-                    except:
-                        pub_date = datetime.fromisoformat(pub_date.split('T')[0])
+        articles = []
+        
+        # Check if this is a forex pair (no colon prefix, or contains currency codes)
+        is_forex = (
+            len(ticker) == 6 and ticker.isalpha() and ticker.isupper() or
+            ticker.startswith("C:") or
+            "USD" in ticker.upper()
+        )
+        
+        # Use ForexFactory for forex pairs if enabled
+        if is_forex and self.has_forexfactory and self.forexfactory_client:
+            try:
+                days_back = (datetime.fromisoformat(end_date) - datetime.fromisoformat(start_date)).days
+                forexfactory_news = self.forexfactory_client.get_usd_news(
+                    days_back=max(days_back, 7),
+                    limit=limit
+                )
+                articles.extend(forexfactory_news)
+            except Exception as e:
+                print(f"ForexFactory fetch failed: {e}")
+        
+        # Use Polygon for stocks or as fallback
+        if self.has_polygon and self.client:
+            try:
+                # Polygon news API
+                news = self.client.list_ticker_news(ticker=ticker, limit=limit)
                 
-                if isinstance(pub_date, datetime):
-                    pub_date_naive = pub_date.replace(tzinfo=None)
-                    if pub_date_naive < start_dt or pub_date_naive > end_dt:
+                start_dt = datetime.fromisoformat(start_date)
+                end_dt = datetime.fromisoformat(end_date)
+                
+                polygon_articles = []
+                for item in news:
+                    # Filter by date range
+                    pub_date = item.published_utc
+                    if isinstance(pub_date, str):
+                        try:
+                            pub_date = datetime.fromisoformat(pub_date.replace('Z', '+00:00').replace('+00:00', ''))
+                        except:
+                            pub_date = datetime.fromisoformat(pub_date.split('T')[0])
+                    
+                    if isinstance(pub_date, datetime):
+                        pub_date_naive = pub_date.replace(tzinfo=None)
+                        if pub_date_naive < start_dt or pub_date_naive > end_dt:
+                            continue
+                    
+                    # Combine title and description for sentiment
+                    text = f"{item.title or ''} {item.description or ''}".strip()
+                    
+                    if not text:
                         continue
+                    
+                    # Analyze sentiment
+                    sentiment = self.sentiment_analyzer.analyze(text)
+                    
+                    polygon_articles.append({
+                        "title": item.title,
+                        "description": item.description,
+                        "published_utc": item.published_utc,
+                        "article_url": item.article_url,
+                        "sentiment": sentiment,
+                        "sentiment_score": self._calculate_sentiment_score(sentiment),
+                    })
                 
-                # Combine title and description for sentiment
-                text = f"{item.title or ''} {item.description or ''}".strip()
-                
-                if not text:
-                    continue
-                
-                # Analyze sentiment
-                sentiment = self.sentiment_analyzer.analyze(text)
-                
-                articles.append({
-                    "title": item.title,
-                    "description": item.description,
-                    "published_utc": item.published_utc,
-                    "article_url": item.article_url,
-                    "sentiment": sentiment,
-                    "sentiment_score": self._calculate_sentiment_score(sentiment),
-                })
-            
-            return articles
-        except Exception as e:
-            # Fallback: return empty list if news fetch fails
-            return []
+                articles.extend(polygon_articles)
+            except Exception as e:
+                print(f"Polygon news fetch failed: {e}")
+        
+        return articles[:limit]
     
     def _calculate_sentiment_score(self, sentiment: Dict[str, float]) -> float:
         """
@@ -108,9 +158,36 @@ class NewsClient:
         """
         Get aggregate sentiment for a ticker over a time period.
         Returns average sentiment score and article count.
+        
+        For forex pairs, prioritizes ForexFactory if enabled.
         """
+        # Check if forex pair
+        is_forex = (
+            len(ticker.replace("C:", "")) == 6 and ticker.replace("C:", "").isalpha() or
+            "USD" in ticker.upper()
+        )
+        
+        # Use ForexFactory for forex if enabled
+        if is_forex and self.has_forexfactory and self.forexfactory_client:
+            try:
+                # Extract currency if needed (e.g., EURUSD -> USD)
+                currency = "USD"  # Default to USD for ForexFactory
+                if "USD" in ticker.upper():
+                    currency = "USD"
+                
+                return self.forexfactory_client.get_aggregate_sentiment(
+                    currency=currency,
+                    days_back=days_back,
+                )
+            except Exception as e:
+                print(f"ForexFactory sentiment failed: {e}")
+        
+        # Fallback to Polygon or regular method
         # Calculate date range
-        end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+        try:
+            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+        except:
+            end_dt = datetime.fromisoformat(end_date)
         start_dt = end_dt - timedelta(days=days_back)
         
         articles = self.get_news_for_ticker(

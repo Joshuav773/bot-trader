@@ -13,9 +13,14 @@ def get_news_sentiment(
     ticker: str,
     days_back: int = Query(7, ge=1, le=30),
 ) -> Dict[str, Any]:
-    """Get aggregate news sentiment for a ticker."""
+    """Get aggregate news sentiment for a ticker. Uses ForexFactory for forex pairs."""
     try:
-        client = NewsClient()
+        # Check if forex pair
+        is_forex = (
+            len(ticker.replace("C:", "")) == 6 and ticker.replace("C:", "").isalpha() or
+            "USD" in ticker.upper()
+        )
+        client = NewsClient(use_forexfactory=is_forex)
         from datetime import datetime, timedelta
         end_date = datetime.utcnow().strftime("%Y-%m-%d")
         start_date = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y-%m-%d")
@@ -32,9 +37,14 @@ def get_news_articles(
     days_back: int = Query(7, ge=1, le=30),
     limit: int = Query(50, ge=1, le=100),
 ) -> List[Dict[str, Any]]:
-    """Get news articles with sentiment for a ticker."""
+    """Get news articles with sentiment for a ticker. Uses ForexFactory for forex pairs."""
     try:
-        client = NewsClient()
+        # Check if forex pair
+        is_forex = (
+            len(ticker.replace("C:", "")) == 6 and ticker.replace("C:", "").isalpha() or
+            "USD" in ticker.upper()
+        )
+        client = NewsClient(use_forexfactory=is_forex)
         from datetime import datetime, timedelta
         end_date = datetime.utcnow().strftime("%Y-%m-%d")
         start_date = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y-%m-%d")

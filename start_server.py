@@ -20,28 +20,38 @@ else:
     print(f"✓ Found PORT environment variable: {PORT}")
 
 port = int(PORT)
+
+# Always use 0.0.0.0 by default (works for containers and local dev)
+# Only use 127.0.0.1 if explicitly set in HOST environment variable
 host = os.environ.get("HOST", "0.0.0.0")
 
-# For Render, always use 0.0.0.0 to bind to all interfaces
-# Render sets RENDER=true in environment
-if "RENDER" in os.environ or os.environ.get("ENV") == "production":
-    host = "0.0.0.0"
-    print(f"✓ Production mode: Binding to {host}")
-
 # Determine if we're in development (reload mode)
-is_dev = os.environ.get("ENV", "").lower() != "production"
-reload_enabled = is_dev and host == "127.0.0.1"
+# Only enable reload in true local development with explicit ENV=development
+is_dev = os.environ.get("ENV", "").lower() == "development" and host == "127.0.0.1"
+reload_enabled = is_dev
+
+print(f"✓ Binding to {host}:{port}")
+if "FLY_APP_NAME" in os.environ:
+    print(f"✓ Detected Fly.io deployment: {os.environ.get('FLY_APP_NAME')}")
 
 if __name__ == "__main__":
     print(f"🚀 Starting server on {host}:{port}")
     print(f"   Environment: {os.environ.get('ENV', 'production')}")
     print(f"   PORT env var: {os.environ.get('PORT', 'NOT SET')}")
+    print(f"   HOST: {host}")
+    if "FLY_APP_NAME" in os.environ:
+        print(f"   Fly.io App: {os.environ.get('FLY_APP_NAME')}")
     if reload_enabled:
         print("   Development mode: Auto-reload enabled")
     
     try:
         import uvicorn
         # Start the server - this will bind to the port immediately
+        # Use workers=1 for Fly.io to avoid issues
+        # Prepare uvicorn arguments
+        # Use uvicorn.run directly - don't use workers on Fly.io
+        # Workers can cause issues with health checks and port binding
+        print(f"✓ Starting uvicorn server...")
         uvicorn.run(
             "api.main:app",
             host=host,

@@ -197,6 +197,12 @@ bot-trader/
 
 - **`SETUP.md`** - First time setup and local development
 - **`DEPLOYMENT.md`** - Deploy to production (Vercel + Render + Neon)
+- **`FLYIO_STEP_BY_STEP.md`** - Step-by-step Fly.io deployment guide ⚡ Fastest
+- **`RAILWAY_STEP_BY_STEP.md`** - Step-by-step Railway deployment guide ⭐ Easiest
+- **`DEPLOY_RAILWAY.md`** - Railway deployment overview
+- **`DEPLOY_FLYIO.md`** - Fly.io deployment guide
+- **`FLYIO_VS_RAILWAY.md`** - Comparison guide (which to choose?)
+- **`WHY_RENDER.md`** - Why Render was recommended (and when it makes sense)
 
 ## Advanced Features
 
