@@ -1,31 +1,39 @@
-# Fly.io configuration for FastAPI backend
-# Open source platform with easy configuration via 'fly secrets set'
-app = "bot-trader-api"
-primary_region = "iad"
+# fly.toml app configuration file generated for bot-trader-api on 2025-11-04T23:35:17-05:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'bot-trader-api'
+primary_region = 'iad'
 
 [build]
 
 [env]
-  PORT = "8000"
+  PORT = '8000'
 
 [http_service]
   internal_port = 8000
   force_https = true
-  auto_stop_machines = true
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 0
-  processes = ["app"]
+  processes = ['app']
+  
 
 [[services]]
-  protocol = "tcp"
+  protocol = 'tcp'
   internal_port = 8000
 
   [[services.ports]]
     port = 80
-    handlers = ["http"]
+    handlers = ['http']
     force_https = true
 
   [[services.ports]]
     port = 443
-    handlers = ["tls", "http"]
+    handlers = ['tls', 'http']
 
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1

@@ -20,28 +20,60 @@ else:
     print(f"✓ Found PORT environment variable: {PORT}")
 
 port = int(PORT)
+
+# Always use 0.0.0.0 by default (works for containers and local dev)
+# Only use 127.0.0.1 if explicitly set in HOST environment variable
 host = os.environ.get("HOST", "0.0.0.0")
 
-# For Render, always use 0.0.0.0 to bind to all interfaces
-# Render sets RENDER=true in environment
-if "RENDER" in os.environ or os.environ.get("ENV") == "production":
-    host = "0.0.0.0"
-    print(f"✓ Production mode: Binding to {host}")
-
 # Determine if we're in development (reload mode)
-is_dev = os.environ.get("ENV", "").lower() != "production"
-reload_enabled = is_dev and host == "127.0.0.1"
+# Only enable reload in true local development with explicit ENV=development
+is_dev = os.environ.get("ENV", "").lower() == "development" and host == "127.0.0.1"
+reload_enabled = is_dev
+
+print(f"✓ Binding to {host}:{port}")
+if "FLY_APP_NAME" in os.environ:
+    print(f"✓ Detected Fly.io deployment: {os.environ.get('FLY_APP_NAME')}")
 
 if __name__ == "__main__":
     print(f"🚀 Starting server on {host}:{port}")
     print(f"   Environment: {os.environ.get('ENV', 'production')}")
     print(f"   PORT env var: {os.environ.get('PORT', 'NOT SET')}")
+    print(f"   HOST: {host}")
+    if "FLY_APP_NAME" in os.environ:
+        print(f"   Fly.io App: {os.environ.get('FLY_APP_NAME')}")
     if reload_enabled:
         print("   Development mode: Auto-reload enabled")
     
+    # Flush output immediately
+    sys.stdout.flush()
+    sys.stderr.flush()
+    
     try:
         import uvicorn
-        # Start the server - this will bind to the port immediately
+        import signal
+        import atexit
+        
+        # Register cleanup handlers
+        def cleanup():
+            print("\n🛑 Server shutting down...")
+            sys.stdout.flush()
+        
+        atexit.register(cleanup)
+        
+        def signal_handler(sig, frame):
+            print(f"\n🛑 Received signal {sig}, shutting down gracefully...")
+            sys.exit(0)
+        
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
+        
+        print(f"✓ Starting uvicorn server on {host}:{port}")
+        print(f"   Server will bind immediately - ML libraries load in background")
+        sys.stdout.flush()
+        
+        # Use uvicorn.run() - it will import the app and bind
+        # The health endpoint is registered first in api/main.py, so it should respond quickly
+        # even while TensorFlow loads in the background
         uvicorn.run(
             "api.main:app",
             host=host,
@@ -52,10 +84,18 @@ if __name__ == "__main__":
         )
     except KeyboardInterrupt:
         print("\n🛑 Server stopped by user")
+        sys.stdout.flush()
         sys.exit(0)
+    except ImportError as e:
+        print(f"❌ Import error: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.stderr.flush()
+        sys.exit(1)
     except Exception as e:
         print(f"❌ Failed to start server: {e}")
         import traceback
         traceback.print_exc()
+        sys.stderr.flush()
         sys.exit(1)
 

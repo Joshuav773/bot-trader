@@ -60,7 +60,8 @@ class ForexConfluenceStrategy(ConfluenceStrategy):
         
         if not self.news_client:
             try:
-                self.news_client = NewsClient()
+                # Use ForexFactory for forex news
+                self.news_client = NewsClient(use_forexfactory=True)
             except Exception:
                 return None
         
