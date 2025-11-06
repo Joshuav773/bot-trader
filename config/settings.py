@@ -37,6 +37,11 @@ JWT_EXPIRES_MIN = int(os.getenv("JWT_EXPIRES_MIN", "60"))
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 
+if not POLYGON_API_KEY:
+    print("❌ POLYGON_API_KEY not set in environment")
+else:
+    print("✓ POLYGON_API_KEY loaded from environment")
+
 # Polygon.io API Data Limits (days of historical data available per timeframe)
 # These can be adjusted based on your Polygon.io subscription tier
 # Free tier limits: 5m=30d, 15m=60d, 30m=90d, 1h=2y, 4h=2y, 1d=unlimited

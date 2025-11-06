@@ -43,11 +43,15 @@ except Exception as e:
     print(f"⚠ Warning: Failed to import backtest router: {e}")
     backtest_router = None
 
+# ML router loads lazily - TensorFlow may take time to initialize
+# Import it after CORS is configured so server can start quickly
+ml_router = None
 try:
     from api.routers import ml as ml_router
     _routers_loaded['ml'] = ml_router
 except Exception as e:
-    print(f"⚠ Warning: Failed to import ml router: {e}")
+    print(f"⚠ Warning: Failed to import ml router (TensorFlow may be loading): {e}")
+    print(f"   ML endpoints will not be available until TensorFlow loads")
     ml_router = None
 
 try:

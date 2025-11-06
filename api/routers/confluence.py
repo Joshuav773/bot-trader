@@ -88,6 +88,10 @@ def backtest_confluence(req: ConfluenceBacktestRequest) -> Dict[str, Any]:
         }
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -117,6 +121,12 @@ def optimize_confluence(req: ConfluenceOptimizeRequest) -> Dict[str, Any]:
             len(req.rsi_overbought_range) *
             len(req.min_confirmations_range)
         )
+
+        if total_combos > 1500:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Parameter grid too large ({total_combos} combinations). Please reduce the range sizes.",
+            )
         
         combo_num = 0
         for fast_ma in req.fast_ma_range:
@@ -186,6 +196,10 @@ def optimize_confluence(req: ConfluenceOptimizeRequest) -> Dict[str, Any]:
         }
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
