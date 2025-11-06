@@ -1,5 +1,9 @@
-import pandas as pd
+import logging
+import os
+import time
 from typing import Optional, Tuple
+
+import pandas as pd
 
 # Robust import for Polygon REST client across package variants
 try:
@@ -14,6 +18,8 @@ except Exception:  # pragma: no cover
 
 from config.settings import POLYGON_API_KEY
 
+logger = logging.getLogger(__name__)
+
 
 class PolygonDataClient:
     """Client for fetching financial data from Polygon.io.
@@ -23,10 +29,31 @@ class PolygonDataClient:
     and a DatetimeIndex in UTC.
     """
 
-    def __init__(self, api_key: Optional[str] = POLYGON_API_KEY):
+    def __init__(
+        self,
+        api_key: Optional[str] = POLYGON_API_KEY,
+        *,
+        retries: Optional[int] = None,
+        backoff_seconds: Optional[float] = None,
+        read_timeout: Optional[float] = None,
+        connect_timeout: Optional[float] = None,
+    ):
         if not api_key:
             raise ValueError("Polygon API key is not set.")
-        self.client = RESTClient(api_key)
+        self.retries = retries or int(os.getenv("POLYGON_MAX_RETRIES", "3"))
+        self.backoff_seconds = backoff_seconds or float(os.getenv("POLYGON_RETRY_BACKOFF", "1.5"))
+        rt = read_timeout or float(os.getenv("POLYGON_READ_TIMEOUT", "15"))
+        ct = connect_timeout or float(os.getenv("POLYGON_CONNECT_TIMEOUT", "5"))
+        try:
+            self.client = RESTClient(
+                api_key,
+                read_timeout=rt,
+                connect_timeout=ct,
+            )
+        except TypeError:
+            # Older versions of polygon-api-client may not support timeout kwargs
+            logger.warning("Polygon RESTClient does not support timeout parameters, proceeding without custom timeouts.")
+            self.client = RESTClient(api_key)
 
     def normalize_forex_ticker(self, ticker: str) -> str:
         """
@@ -62,7 +89,7 @@ class PolygonDataClient:
         # Parse timeframe
         multiplier, timespan = self._parse_timeframe(timeframe)
         
-        aggs = self.client.get_aggs(ticker, multiplier, timespan, start_date, end_date)
+        aggs = self._get_aggs_with_retry(ticker, multiplier, timespan, start_date, end_date)
         if not aggs:
             return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"]).astype({
                 "Open": "float64", "High": "float64", "Low": "float64", "Close": "float64", "Volume": "float64"
@@ -124,3 +151,26 @@ class PolygonDataClient:
             DataFrame with columns ['Open','High','Low','Close','Volume'] indexed by datetime (UTC).
         """
         return self.get_bars(ticker, start_date, end_date, timeframe="1d")
+
+    def _get_aggs_with_retry(self, ticker: str, multiplier: int, timespan: str, start_date: str, end_date: str):
+        """Call Polygon get_aggs with retry + exponential backoff."""
+        last_error: Optional[Exception] = None
+        for attempt in range(1, self.retries + 1):
+            try:
+                return self.client.get_aggs(ticker, multiplier, timespan, start_date, end_date)
+            except Exception as exc:  # broad catch but we re-raise with context
+                last_error = exc
+                wait_time = self.backoff_seconds * attempt
+                logger.warning(
+                    "Polygon get_aggs failed (attempt %s/%s) for %s %s %s-%s: %s",
+                    attempt,
+                    self.retries,
+                    ticker,
+                    timespan,
+                    start_date,
+                    end_date,
+                    exc,
+                )
+                if attempt < self.retries:
+                    time.sleep(wait_time)
+        raise RuntimeError(f"Polygon API error: {last_error}") from last_error

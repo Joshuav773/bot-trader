@@ -1,8 +1,8 @@
 """
 Filters and aggregates trades to identify large orders >= $500k.
 """
-from typing import Dict, List, Optional
-from datetime import datetime
+from typing import Dict, List, Optional, Union
+from datetime import datetime, timezone
 import json
 
 from sqlmodel import Session, select
@@ -40,12 +40,17 @@ def process_trade(trade: Dict, session: Session) -> Optional[OrderFlow]:
     
     order_type = "buy" if side in ("buy", "b") else "sell"
     
+    # Determine trade timestamp if provided
+    trade_time = _parse_timestamp(trade.get("timestamp"))
+    if not trade_time:
+        trade_time = datetime.utcnow().replace(tzinfo=timezone.utc)
+
     order = OrderFlow(
         ticker=ticker,
         order_type=order_type,
         order_size_usd=order_size_usd,
         price=price,
-        timestamp=datetime.utcnow(),
+        timestamp=trade_time,
         source="polygon",
         raw_data=json.dumps(trade),
     )
@@ -74,3 +79,28 @@ def get_sp500_tickers() -> List[str]:
         "CPRT", "DFS", "FITB", "STT", "HBAN", "RF", "CFG", "MTB", "PNC",
         "TFC", "KEY", "USB", "ZION", "BAC", "JPM", "WFC", "C", "GS", "MS",
     ]
+
+
+def _parse_timestamp(value: Union[int, float, str, None]) -> Optional[datetime]:
+    """Parse polygon trade timestamp values."""
+    if value is None:
+        return None
+    try:
+        if isinstance(value, (int, float)):
+            # Polygon timestamps may be in nanoseconds or milliseconds
+            if value > 1e15:  # nanoseconds
+                return datetime.fromtimestamp(value / 1_000_000_000, tz=timezone.utc).replace(tzinfo=None)
+            elif value > 1e12:  # microseconds
+                return datetime.fromtimestamp(value / 1_000_000, tz=timezone.utc).replace(tzinfo=None)
+            elif value > 1e10:  # milliseconds
+                return datetime.fromtimestamp(value / 1_000, tz=timezone.utc).replace(tzinfo=None)
+            else:
+                return datetime.fromtimestamp(value, tz=timezone.utc).replace(tzinfo=None)
+        elif isinstance(value, str):
+            # ISO format or numeric string
+            if value.isdigit():
+                return _parse_timestamp(int(value))
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc).replace(tzinfo=None)
+    except Exception:
+        return None
+    return None

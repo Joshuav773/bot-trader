@@ -148,6 +148,19 @@ POLYGON_LIMIT_30M=90
 POLYGON_LIMIT_1H=730
 POLYGON_LIMIT_4H=730
 POLYGON_LIMIT_1D=3650
+
+# Polygon retry / timeout tuning (optional)
+POLYGON_MAX_RETRIES=3
+POLYGON_RETRY_BACKOFF=1.5
+POLYGON_READ_TIMEOUT=15
+POLYGON_CONNECT_TIMEOUT=5
+
+# Order flow streamer (optional)
+ORDER_FLOW_POLL_INTERVAL=60          # seconds between polls
+ORDER_FLOW_LOOKBACK_MINUTES=5        # how far back to fetch trades
+ORDER_FLOW_MAX_TICKERS=25           # limit number of tickers to poll
+# ORDER_FLOW_TICKERS=AAPL,MSFT,SPY   # optional custom list
+# ML_MAX_ROWS=5000                   # Max rows used for LSTM training/prediction
 ```
 
 ### 3. Start Backend
@@ -392,7 +405,7 @@ bot-trader/
 ├── order_flow/                  # Order flow tracking
 │   ├── aggregator.py            # Large order filtering
 │   ├── price_tracker.py         # Price impact tracking
-│   └── streamer.py              # Real-time streaming (placeholder)
+│   └── streamer.py              # Polygon REST streamer (Fly.io process)
 │
 ├── risk_management/             # Risk controls
 │   ├── position_sizer.py        # Position sizing
@@ -452,7 +465,8 @@ bot-trader/
      ADMIN_EMAIL=admin@example.com \
      ADMIN_PASSWORD=YourPassword
    ```
-5. Deploy: `flyctl deploy`
+5. Deploy: `flyctl deploy` (the app process serves the API; the `streamer` process runs `python -m order_flow.streamer`)
+6. Verify both processes: `flyctl status --app bot-trader-api` (should show `app` and `streamer`)
 
 **Database (Neon):**
 1. Sign up at [neon.tech](https://neon.tech)

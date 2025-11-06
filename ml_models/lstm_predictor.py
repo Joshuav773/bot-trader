@@ -16,6 +16,10 @@ def _ensure_tensorflow():
             return keras, layers
         except ImportError as e:
             raise ImportError(f"TensorFlow not available: {e}. Install with: pip install tensorflow-cpu")
+    else:
+        from tensorflow import keras
+        from tensorflow.keras import layers
+        return keras, layers
 
 
 class LstmPredictor:
@@ -24,7 +28,12 @@ class LstmPredictor:
     def __init__(self, window: int = 50, units: int = 32):
         # Lazy load TensorFlow only when creating the model
         keras, layers = _ensure_tensorflow()
-        
+        # Clear previous graphs to avoid memory buildup on small instances
+        try:
+            keras.backend.clear_session()
+        except Exception:
+            pass
+
         self.window = window
         self.units = units
         self.model = keras.Sequential(
