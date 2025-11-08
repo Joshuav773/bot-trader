@@ -13,10 +13,7 @@ export default function Navbar({ currentPage }: { currentPage?: string }) {
 
   const navItems = [
     { label: "Dashboard", href: "/dashboard" },
-    { label: "Confluence", href: "/confluence" },
-    { label: "Forex", href: "/forex" },
     { label: "Order Flow", href: "/orderflow" },
-    { label: "Train ML", href: "/train" },
   ];
 
   return (

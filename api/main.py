@@ -30,6 +30,13 @@ def health_check():
 # This allows the app to start even if some routers have issues
 _routers_loaded = {}
 try:
+    from api.routers import auth as auth_router
+    _routers_loaded['auth'] = auth_router
+except Exception as e:
+    print(f"⚠ Warning: Failed to import auth router: {e}")
+    auth_router = None
+
+try:
     from api.routers import analysis as analysis_router
     _routers_loaded['analysis'] = analysis_router
 except Exception as e:
@@ -43,58 +50,12 @@ except Exception as e:
     print(f"⚠ Warning: Failed to import backtest router: {e}")
     backtest_router = None
 
-# ML router loads lazily - TensorFlow may take time to initialize
-# Import it after CORS is configured so server can start quickly
-ml_router = None
-try:
-    from api.routers import ml as ml_router
-    _routers_loaded['ml'] = ml_router
-except Exception as e:
-    print(f"⚠ Warning: Failed to import ml router (TensorFlow may be loading): {e}")
-    print(f"   ML endpoints will not be available until TensorFlow loads")
-    ml_router = None
-
-try:
-    from api.routers import auth as auth_router
-    _routers_loaded['auth'] = auth_router
-except Exception as e:
-    print(f"⚠ Warning: Failed to import auth router: {e}")
-    auth_router = None
-
-try:
-    from api.routers import models as models_router
-    _routers_loaded['models'] = models_router
-except Exception as e:
-    print(f"⚠ Warning: Failed to import models router: {e}")
-    models_router = None
-
 try:
     from api.routers import orderflow as orderflow_router
     _routers_loaded['orderflow'] = orderflow_router
 except Exception as e:
     print(f"⚠ Warning: Failed to import orderflow router: {e}")
     orderflow_router = None
-
-try:
-    from api.routers import confluence as confluence_router
-    _routers_loaded['confluence'] = confluence_router
-except Exception as e:
-    print(f"⚠ Warning: Failed to import confluence router: {e}")
-    confluence_router = None
-
-try:
-    from api.routers import news as news_router
-    _routers_loaded['news'] = news_router
-except Exception as e:
-    print(f"⚠ Warning: Failed to import news router: {e}")
-    news_router = None
-
-try:
-    from api.routers import forex as forex_router
-    _routers_loaded['forex'] = forex_router
-except Exception as e:
-    print(f"⚠ Warning: Failed to import forex router: {e}")
-    forex_router = None
 
 try:
     from api.security import get_current_user
@@ -228,22 +189,12 @@ async def on_startup():
 # Include routers only if they loaded successfully
 if auth_router:
     app.include_router(auth_router.router, prefix="/auth", tags=["auth"])
-if backtest_router:
-    app.include_router(backtest_router.router, prefix="/backtest", tags=["backtest"], dependencies=[Depends(get_current_user)])
 if analysis_router:
     app.include_router(analysis_router.router, prefix="/analysis", tags=["analysis"], dependencies=[Depends(get_current_user)])
-if ml_router:
-    app.include_router(ml_router.router, prefix="/ml", tags=["ml"], dependencies=[Depends(get_current_user)])
-if models_router:
-    app.include_router(models_router.router, tags=["models"], dependencies=[Depends(get_current_user)])
+if backtest_router:
+    app.include_router(backtest_router.router, prefix="/backtest", tags=["backtest"], dependencies=[Depends(get_current_user)])
 if orderflow_router:
     app.include_router(orderflow_router.router, prefix="/order-flow", tags=["order-flow"], dependencies=[Depends(get_current_user)])
-if confluence_router:
-    app.include_router(confluence_router.router, prefix="/confluence", tags=["confluence"], dependencies=[Depends(get_current_user)])
-if news_router:
-    app.include_router(news_router.router, prefix="/news", tags=["news"], dependencies=[Depends(get_current_user)])
-if forex_router:
-    app.include_router(forex_router.router, prefix="/forex", tags=["forex"], dependencies=[Depends(get_current_user)])
 
 
 @app.get("/")

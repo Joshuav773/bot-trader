@@ -30,9 +30,9 @@ class OrderFlowStreamer:
         self.api_key = api_key
         self.polygon_client = PolygonDataClient(api_key) if api_key else None
         self.running = False
-        self.poll_interval = int(os.getenv("ORDER_FLOW_POLL_INTERVAL", "60"))  # seconds
+        self.poll_interval = int(os.getenv("ORDER_FLOW_POLL_INTERVAL", "120"))  # seconds
         self.lookback_minutes = int(os.getenv("ORDER_FLOW_LOOKBACK_MINUTES", "5"))
-        self.max_tickers = int(os.getenv("ORDER_FLOW_MAX_TICKERS", "25"))
+        self.max_tickers = int(os.getenv("ORDER_FLOW_MAX_TICKERS", "10"))
         tickers_env = os.getenv("ORDER_FLOW_TICKERS")
         if tickers_env:
             self.tickers = [t.strip().upper() for t in tickers_env.split(",") if t.strip()]
