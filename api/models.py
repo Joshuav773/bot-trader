@@ -16,13 +16,21 @@ class User(SQLModel, table=True):
 
 
 class OrderFlow(SQLModel, table=True):
-    """Tracks large orders (>= 500k) for S&P 500 tickers."""
+    """Tracks large orders (>= 500k) for tracked instruments."""
     __tablename__ = "order_flow"
 
     id: Optional[int] = Field(default=None, primary_key=True)
     ticker: str = Field(index=True)
-    order_type: str = Field(index=True)  # 'buy' or 'sell'
+    display_ticker: Optional[str] = Field(default=None, index=True)
+    order_type: str = Field(index=True)  # 'buy'/'sell' or 'call'/'put'
+    order_side: Optional[str] = Field(default=None, index=True)  # buy/sell direction when available
+    instrument: str = Field(default="equity", index=True)  # equity | forex | option
+    option_type: Optional[str] = Field(default=None, index=True)  # call | put
+    contracts: Optional[int] = Field(default=None)
+    option_strike: Optional[float] = Field(default=None)
+    option_expiration: Optional[datetime] = Field(default=None, index=True)
     order_size_usd: float = Field(index=True)  # Total USD value
+    size: Optional[float] = Field(default=None)  # Raw trade size (shares, lots, contracts)
     price: float  # Execution price
     timestamp: datetime = Field(default_factory=datetime.utcnow, index=True)
     source: str = Field(default="polygon")  # 'polygon' or 'alpaca'
