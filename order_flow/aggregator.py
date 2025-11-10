@@ -14,7 +14,12 @@ import requests
 from sqlmodel import Session
 
 from api.models import OrderFlow
-from config.settings import POLYGON_API_KEY
+from config.settings import POLYGON_API_KEY, FINNHUB_API_KEY
+
+try:
+    from data_ingestion.finnhub_client import FinnhubClient
+except Exception:  # pragma: no cover - optional dependency guard
+    FinnhubClient = None  # type: ignore[assignment]
 
 
 logger = logging.getLogger(__name__)
@@ -143,7 +148,13 @@ def get_sp500_tickers() -> List[str]:
             return list(_SP500_CACHE["tickers"])  # copy
 
     tickers: List[str] = []
-    if POLYGON_API_KEY:
+    if FINNHUB_API_KEY and FinnhubClient:
+        try:
+            tickers = _fetch_sp500_from_finnhub()
+        except Exception as exc:  # pragma: no cover - external service
+            logger.warning("Failed to refresh S&P 500 tickers from Finnhub: %s", exc)
+
+    if not tickers and POLYGON_API_KEY:
         try:
             tickers = _fetch_sp500_from_polygon()
         except Exception as exc:  # pragma: no cover - external service
@@ -192,6 +203,20 @@ def _fetch_sp500_from_polygon() -> List[str]:
     # Deduplicate and sort for stability
     deduped = sorted({ticker.upper() for ticker in tickers})
     return deduped
+
+
+def _fetch_sp500_from_finnhub() -> List[str]:
+    """Fetch the latest S&P 500 list from Finnhub index constituents API."""
+    if not FINNHUB_API_KEY:
+        return []
+    if not FinnhubClient:
+        raise RuntimeError("Finnhub client unavailable")
+
+    client = FinnhubClient(FINNHUB_API_KEY)
+    constituents = client.get_index_constituents("^GSPC")
+    # Finnhub includes ETFs like SPY; filter to uppercase alphabetic or dot tickers
+    cleaned = [ticker for ticker in constituents if ticker]
+    return sorted({ticker.upper() for ticker in cleaned})
 
 
 def _detect_instrument(ticker: str) -> str:

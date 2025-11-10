@@ -1,3 +1,4 @@
+import os
 from typing import Iterator
 
 from sqlmodel import SQLModel, create_engine, Session
@@ -16,7 +17,12 @@ if not normalized_url:
     engine = create_engine("sqlite:///./app.db", echo=False)
 else:
     try:
-        engine = create_engine(normalized_url, echo=False)
+        engine = create_engine(
+            normalized_url,
+            echo=False,
+            pool_pre_ping=True,
+            pool_recycle=int(os.getenv("DB_POOL_RECYCLE_SECONDS", "1800")),
+        )
         # Test connection (SQLAlchemy 2.0+ compatible)
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))

@@ -63,21 +63,30 @@ pip install -r requirements.txt
 
 cp .env.example .env  # or create manually
 python start_server.py
+
+# optional: in another terminal start the large-order streamer
+# (requires POLYGON_API_KEY or FINNHUB_API_KEY)
+python -m order_flow.streamer
 ```
 
 Key `.env` variables:
 
 ```
-POLYGON_API_KEY=pk_your_key
+POLYGON_API_KEY=pk_your_key                # optional if using Polygon
+FINNHUB_API_KEY=fh_your_key                # optional if using Finnhub
+ORDER_FLOW_PROVIDER=finnhub                # or polygon
 DATABASE_URL=postgresql+psycopg://user:pass@host/db   # Neon recommended
 JWT_SECRET=change-me
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=SuperSecure123
 CORS_ALLOW_ORIGINS=http://localhost:3000,https://your-frontend.vercel.app
-ORDER_FLOW_POLL_INTERVAL=60          # seconds between polls
+ORDER_FLOW_POLL_INTERVAL=60
 ORDER_FLOW_LOOKBACK_MINUTES=5
-ORDER_FLOW_MAX_TICKERS=10
-# ORDER_FLOW_TICKERS=AAPL,SPY,MSFT   # optional custom list
+ORDER_FLOW_MAX_EQUITY_TICKERS=40
+ORDER_FLOW_EQUITY_BATCH_SIZE=20
+ORDER_FLOW_MAX_FOREX_TICKERS=10
+ORDER_FLOW_FOREX_BATCH_SIZE=5
+# ORDER_FLOW_TICKERS=AAPL,SPY,EURUSD   # optional custom list
 ```
 
 ### Frontend
