@@ -58,6 +58,13 @@ except Exception as e:
     orderflow_router = None
 
 try:
+    from api.routers import alerts as alerts_router
+    _routers_loaded['alerts'] = alerts_router
+except Exception as e:
+    print(f"⚠ Warning: Failed to import alerts router: {e}")
+    alerts_router = None
+
+try:
     from api.security import get_current_user
     from api.db import create_db_and_tables
     from api.bootstrap import ensure_single_admin_user
@@ -186,15 +193,13 @@ async def on_startup():
     asyncio.create_task(init_db())
 
 
-# Include routers only if they loaded successfully
+# Include routers
 if auth_router:
     app.include_router(auth_router.router, prefix="/auth", tags=["auth"])
-if analysis_router:
-    app.include_router(analysis_router.router, prefix="/analysis", tags=["analysis"], dependencies=[Depends(get_current_user)])
-if backtest_router:
-    app.include_router(backtest_router.router, prefix="/backtest", tags=["backtest"], dependencies=[Depends(get_current_user)])
 if orderflow_router:
     app.include_router(orderflow_router.router, prefix="/order-flow", tags=["order-flow"], dependencies=[Depends(get_current_user)])
+if alerts_router:
+    app.include_router(alerts_router.router, tags=["alerts"])
 
 
 @app.get("/")
