@@ -1,182 +1,211 @@
-# Bot Trader (Watcher Edition)
+# Bot Trader - Whale Order Watcher
 
-Lightweight FastAPI + Next.js stack focused on two capabilities:
+**State-of-the-art real-time whale order detection system powered by Schwab Streaming API.**
 
-- **Backtesting dashboard** powered by Polygon.io data and Backtrader strategies.
-- **Large order watcher** that polls Polygon REST endpoints, stores trades in Postgres, and exposes the order-flow dashboard.
-
-All heavy ML/forex/news modules were removed to keep hosting costs near $0 on Azure Container Apps.
+A clean, production-ready FastAPI + Next.js application that streams real-time market data from Schwab to detect and alert on large institutional trades (≥ $500k).
 
 ---
 
-## Core Features
+## 🎯 Core Features
 
-- **Secure admin login** with JWT tokens and single master account bootstrap.
-- **Dashboard API**: historical bars with SMA/EMA/RSI plus three ready-to-run strategies (SMA crossover, Bollinger, enhanced SMA).
-- **Order Flow API**: query large trades, price impact snapshots, and aggregated stats.
-- **Polygon-based streamer**: async polling loop that captures trades ≥ $500k and writes to Postgres/Neon.
-- **Docker-first deployment** with GitHub Actions workflow pushing to Azure Container Registry (ACR).
-- **Next.js UI** trimmed to login, dashboard, and order-flow pages only.
+- **Real-time Streaming**: WebSocket-based streaming via Schwab API for instant whale detection
+- **Whale Detection**: Automatically captures trades ≥ $500k with sub-second latency
+- **Real-time Alerts**: Email and SMS notifications when whales are detected
+- **Secure API**: JWT-based authentication with admin dashboard
+- **Clean Architecture**: Schwab-only, no unnecessary dependencies
+- **Production Ready**: Docker-first, ready for deployment
 
 ---
 
-## Project Layout
+## 🏗️ Architecture
 
 ```
 bot-trader/
-├── api/                   # FastAPI backend
-│   ├── main.py            # App bootstrap (CORS, health, routers)
-│   ├── db.py              # SQLModel engine + session helpers
-│   ├── models.py          # User, OrderFlow, PriceSnapshot tables
-│   ├── security.py        # JWT helpers, password hashing
-│   ├── bootstrap.py       # Admin-user seeding
-│   └── routers/           # Active routers (auth, analysis, backtest, orderflow)
-├── analysis_engine/       # Indicator utilities (SMA/EMA/RSI, patterns)
-├── backtester/            # Backtrader engines, metrics, strategies
-├── data_ingestion/        # Polygon REST client + dataframe utilities
-├── order_flow/            # Large-order aggregator + polling streamer
-├── config/settings.py     # Environment variable parsing
-├── frontend/              # Next.js 14 app (login, dashboard, orderflow)
-├── Dockerfile             # Slim Python 3.12 image for backend
-├── requirements.txt       # Minimal Python dependency set
-└── .github/workflows/     # CI build → push image to Azure Container Registry
+├── api/                      # FastAPI backend
+│   ├── main.py               # App bootstrap
+│   ├── db.py                 # Database connection
+│   ├── models.py             # User, OrderFlow models
+│   ├── security.py           # JWT authentication
+│   └── routers/
+│       ├── auth.py           # Login endpoint
+│       └── orderflow.py      # Whale order queries
+├── data_ingestion/
+│   └── schwab_stream_client.py  # Real-time streaming client
+├── order_flow/
+│   ├── aggregator.py         # Trade processing & filtering
+│   └── alerts.py             # Email/SMS alert system
+├── config/
+│   └── settings.py           # Configuration management
+└── frontend/                 # Next.js dashboard
 ```
 
 ---
 
-## Local Development
+## 🚀 Quick Start
 
 ### Prerequisites
 
-- Python 3.12
+- Python 3.12+
 - Node.js 18+
-- Polygon.io API key (free tier works)
-- Postgres/Neon connection string (SQLite fallback for quick tests)
+- Schwab Developer Portal account (free for Schwab account holders)
+- PostgreSQL database (Neon recommended for free tier)
 
-### Backend
+### Installation
 
 ```bash
+# Clone repository
+git clone <your-repo>
+cd bot-trader
+
+# Backend setup
 python -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-cp .env.example .env  # or create manually
-python start_server.py
-
-# optional: in another terminal start the large-order streamer
-# (requires POLYGON_API_KEY or FINNHUB_API_KEY)
-python -m order_flow.streamer
-```
-
-Key `.env` variables:
-
-```
-POLYGON_API_KEY=pk_your_key                # optional if using Polygon
-FINNHUB_API_KEY=fh_your_key                # optional if using Finnhub
-ORDER_FLOW_PROVIDER=finnhub                # or polygon
-DATABASE_URL=postgresql+psycopg://user:pass@host/db   # Neon recommended
-JWT_SECRET=change-me
-ADMIN_EMAIL=admin@example.com
-ADMIN_PASSWORD=SuperSecure123
-CORS_ALLOW_ORIGINS=http://localhost:3000,https://your-frontend.vercel.app
-ORDER_FLOW_POLL_INTERVAL=60
-ORDER_FLOW_LOOKBACK_MINUTES=5
-ORDER_FLOW_MAX_EQUITY_TICKERS=40
-ORDER_FLOW_EQUITY_BATCH_SIZE=20
-ORDER_FLOW_MAX_FOREX_TICKERS=10
-ORDER_FLOW_FOREX_BATCH_SIZE=5
-# ORDER_FLOW_TICKERS=AAPL,SPY,EURUSD   # optional custom list
-```
-
-### Frontend
-
-```bash
+# Frontend setup
 cd frontend
 npm install
-echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local
+cd ..
+```
+
+### Configuration
+
+Create `.env` file:
+
+```bash
+# Schwab Streaming API (Required)
+SCHWAB_APP_KEY=your_app_key
+SCHWAB_APP_SECRET=your_app_secret
+SCHWAB_CALLBACK_URL=http://localhost
+
+# Database
+DATABASE_URL=postgresql+psycopg://user:pass@host/db
+
+# Authentication
+JWT_SECRET=your-secret-key-change-in-production
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=SecurePassword123
+
+# CORS (for frontend)
+CORS_ALLOW_ORIGINS=http://localhost:3000
+
+# Alerts (Optional)
+ALERT_EMAIL_ENABLED=true
+ALERT_EMAIL_SMTP_HOST=smtp.gmail.com
+ALERT_EMAIL_SMTP_PORT=587
+ALERT_EMAIL_SMTP_USER=your_email@gmail.com
+ALERT_EMAIL_SMTP_PASSWORD=your_app_password
+ALERT_EMAIL_FROM=your_email@gmail.com
+ALERT_EMAIL_TO=recipient@example.com
+
+ALERT_SMS_ENABLED=true
+ALERT_SMS_PROVIDER=email_gateway
+ALERT_SMS_EMAIL_GATEWAY=1234567890@vtext.com
+```
+
+### Run
+
+```bash
+# Terminal 1: Start backend
+python start_server.py
+
+# Terminal 2: Start streamer
+python -m data_ingestion.schwab_stream_client
+
+# Terminal 3: Start frontend
+cd frontend
 npm run dev
 ```
 
-Visit `http://localhost:3000`, log in with the admin credentials, and access `/dashboard` or `/orderflow`.
+Visit `http://localhost:3000` and log in with your admin credentials.
 
 ---
 
-## Azure Deployment (Watcher Only)
+## 📚 Setup Guides
 
-1. **Build + Push via GitHub Actions**
-   - Repository secrets already expected:
-     - `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`
-     - `AZURE_CONTAINER_REGISTRY` (e.g. `bottraderacr.azurecr.io`)
-     - `IMAGE_NAME` (e.g. `bot-trader/watcher`)
-   - Workflow: `.github/workflows/push-to-acr.yml`
-   - On push to `main`, GitHub builds `Dockerfile` and pushes `latest` + commit SHA tags to ACR.
+### Schwab API Setup
 
-2. **Create Azure Container Apps environment**
-   - Azure Portal → *Container Apps* → *Create*.
-   - Resource Group: `bottrader-rg`.
-   - Environment name: e.g. `bottrader-env` (East US).
+See **[SCHWAB_STREAM_SETUP.md](./SCHWAB_STREAM_SETUP.md)** for:
+- Creating Schwab Developer Portal app
+- OAuth authorization flow
+- Token management
+- Troubleshooting
 
-3. **Create Container App**
-   - Container Apps → *Create app* → pick `bottrader-env`.
-   - Image source: `Azure Container Registry` → select `bottraderacr`.
-   - Image: choose `bot-trader/watcher:latest`.
-   - Ingress: enable external, port `8000`.
-   - Scale: min replicas `0`, max `1` (consumption plan keeps cost ≈ $0).
+### Alert Configuration
 
-4. **Configure Secrets/Env**
-   - Under *Revisions → Secrets*, add `POLYGON_API_KEY`, `DATABASE_URL`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `JWT_SECRET`, etc.
-   - Map them as environment variables; add plain vars like `WATCHER_ONLY=true`, `ORDER_FLOW_POLL_INTERVAL=60`.
-
-5. **Smoke Test**
-   - Open the Container App URL → `/health` should return `{"status": "healthy"}`.
-   - Use `/docs` to try `/order-flow/large-orders` and `/analysis/chart`.
-
-6. **Point Frontend**
-   - Update Vercel `NEXT_PUBLIC_API_URL` (or local `.env.local`) to the Container App URL.
+See **[ALERTS_SETUP.md](./ALERTS_SETUP.md)** for:
+- Email alerts (Gmail, SendGrid, etc.)
+- SMS alerts (Twilio, email-to-SMS gateways)
+- Configuration examples
 
 ---
 
-## GitHub Actions Workflow
+## 🎯 How It Works
 
-`push-to-acr.yml` steps:
-
-1. Checkout repo.
-2. Authenticate to Azure with the service principal.
-3. Login to ACR (`az acr login`).
-4. `docker build` using the trimmed Dockerfile.
-5. Push `latest` and `<commit>` tags.
-
-This keeps the registry updated so the Container App can be redeployed by switching the tag in the Azure Portal or via `az containerapp revision create`.
+1. **Streaming**: Connects to Schwab WebSocket API for real-time level-one equity data
+2. **Detection**: Calculates `Trade Value = Price × Size` for each trade
+3. **Filtering**: Saves trades where `Trade Value ≥ $500,000`
+4. **Alerts**: Sends email/SMS notifications immediately
+5. **Storage**: Saves to PostgreSQL for historical analysis
 
 ---
 
-## API Overview
+## 📊 API Endpoints
 
-- `POST /auth/login` – obtain JWT (admin only).
-- `POST /analysis/chart` – OHLCV + SMA/EMA/RSI arrays.
-- `POST /analysis/signals` – last few indicator readings & candlestick flags.
-- `POST /backtest/sma-crossover` – run Backtrader SMA strategy.
-- `POST /backtest/bollinger-bands`
-- `POST /backtest/enhanced-sma`
-- `GET /order-flow/large-orders` – recent trades ≥ $500k.
-- `GET /order-flow/price-impact/{order_id}`
-- `GET /order-flow/price-impact-stats`
-- `POST /order-flow/trigger-snapshots/{order_id}` – manual refresh (testing).
+### Authentication
+- `POST /auth/login` - Admin login
 
-All routes (except `/health`, `/docs`) require `Authorization: Bearer <token>`.
+### Order Flow
+- `GET /order-flow/large-orders` - Query whale orders
+  - Query params: `ticker`, `order_type`, `order_side`, `instrument`, `hours`
 
 ---
 
-## Deployment Tips
+## 🛠️ Technology Stack
 
-- **Database**: Neon free tier works well; store the pooled connection string in `DATABASE_URL`.
-- **CORS**: keep `CORS_ALLOW_ORIGINS` synchronized between Azure secrets and frontend environment.
-- **Streamer**: For production reliability consider a second Container App instance running only `python -m order_flow.streamer`. For now the polling loop can run inside the main app process.
-- **Scaling**: Container Apps consumption plan spins down to zero. First request may take a few seconds while the container warms up; set frontend loaders accordingly.
+- **Backend**: FastAPI, SQLModel, PostgreSQL
+- **Streaming**: schwab-py library (WebSocket)
+- **Frontend**: Next.js 14, TypeScript, Tailwind CSS
+- **Alerts**: SMTP (email), Twilio/Email Gateway (SMS)
+- **Deployment**: Docker, Azure Container Apps
 
 ---
 
-## License
+## 📦 Dependencies
 
-All rights reserved. Internal use only.
+Minimal, production-focused dependencies:
+- `fastapi` - Web framework
+- `schwab-py` - Schwab API client
+- `sqlmodel` - Database ORM
+- `pandas` - Data processing
+- `requests` - HTTP client (for alerts)
+
+No heavy ML libraries, no unnecessary data providers.
+
+---
+
+## 🔒 Security
+
+- JWT-based authentication
+- Password hashing with bcrypt
+- CORS protection
+- Environment variable secrets
+- Database connection pooling
+
+---
+
+## 📝 License
+
+[Your License Here]
+
+---
+
+## 🤝 Contributing
+
+[Your Contributing Guidelines]
+
+---
+
+## 📞 Support
+
+[Your Support Information]

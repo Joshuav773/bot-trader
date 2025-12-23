@@ -1,14 +1,26 @@
+# Core Framework
 fastapi
-uvicorn
+uvicorn[standard]
 python-dotenv
-pandas
-numpy
-backtrader
+
+# Database
 sqlmodel
 SQLAlchemy
-psycopg[binary]
-passlib
+psycopg[binary]  # PostgreSQL adapter
+
+# Authentication & Security
+passlib[bcrypt]
 PyJWT
-polygon-api-client
-requests
+
+# Data Processing
+pandas
+numpy
+
+# Schwab API
+schwab-py
+
+# Email Validation
 email-validator
+
+# HTTP Requests (for alerts)
+requests

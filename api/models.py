@@ -33,7 +33,7 @@ class OrderFlow(SQLModel, table=True):
     size: Optional[float] = Field(default=None)  # Raw trade size (shares, lots, contracts)
     price: float  # Execution price
     timestamp: datetime = Field(default_factory=datetime.utcnow, index=True)
-    source: str = Field(default="polygon")  # 'polygon' or 'alpaca'
+    source: str = Field(default="schwab_stream")  # Data source identifier
     raw_data: Optional[str] = None  # JSON for debugging
 
 
@@ -48,3 +48,28 @@ class PriceSnapshot(SQLModel, table=True):
     interval_minutes: int = Field(index=True)  # 1, 5, 15, 60, 1440 (1d)
     price: float
     price_change_pct: float  # % change from order execution price
+
+
+class AlertRecipient(SQLModel, table=True):
+    """Stores email and phone numbers that receive whale order alerts."""
+    __tablename__ = "alert_recipients"
+    __table_args__ = (UniqueConstraint("email", name="uq_alert_email"), UniqueConstraint("phone", name="uq_alert_phone"))
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    email: Optional[str] = Field(default=None, index=True)  # Email address for email alerts
+    phone: Optional[str] = Field(default=None, index=True)  # Phone number for SMS alerts
+    name: Optional[str] = Field(default=None)  # Optional name/description
+    email_enabled: bool = Field(default=True)  # Whether to send email alerts to this recipient
+    sms_enabled: bool = Field(default=True)  # Whether to send SMS alerts to this recipient
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    def __repr__(self) -> str:
+        parts = []
+        if self.name:
+            parts.append(self.name)
+        if self.email:
+            parts.append(f"email:{self.email}")
+        if self.phone:
+            parts.append(f"phone:{self.phone}")
+        return f"AlertRecipient({', '.join(parts)})"

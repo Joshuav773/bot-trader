@@ -10,21 +10,13 @@ import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Union
 
-import requests
 from sqlmodel import Session
 
 from api.models import OrderFlow
-from config.settings import POLYGON_API_KEY, FINNHUB_API_KEY
-
-try:
-    from data_ingestion.finnhub_client import FinnhubClient
-except Exception:  # pragma: no cover - optional dependency guard
-    FinnhubClient = None  # type: ignore[assignment]
+from config.settings import MIN_ORDER_SIZE_USD
 
 
 logger = logging.getLogger(__name__)
-
-MIN_ORDER_SIZE_USD = 500_000
 _SP500_CACHE: Dict[str, Union[float, List[str]]] = {"expires_at": 0.0, "tickers": []}
 _SP500_CACHE_LOCK = threading.Lock()
 _SP500_CACHE_TTL_SECONDS = 60 * 60 * 6  # refresh every 6 hours
@@ -63,7 +55,7 @@ _FALLBACK_SP500 = [
 ]
 
 
-def process_trade(trade: Dict, session: Session) -> Optional[OrderFlow]:
+def process_trade(trade: Dict, session: Session, source: str = "polygon") -> Optional[OrderFlow]:
     """
     Process a single trade and save if it's >= $500k.
 
@@ -122,7 +114,7 @@ def process_trade(trade: Dict, session: Session) -> Optional[OrderFlow]:
         price=price,
         size=size,
         timestamp=trade_time,
-        source="polygon",
+        source=source,
         raw_data=json.dumps(trade),
     )
 
@@ -134,89 +126,32 @@ def process_trade(trade: Dict, session: Session) -> Optional[OrderFlow]:
 
 def get_sp500_tickers() -> List[str]:
     """
-    Return the current S&P 500 constituents. Falls back to a static subset
-    if Polygon is unavailable.
+    Return S&P 500 constituents.
+    
+    Uses a static list of major S&P 500 tickers. For a complete list,
+    you can set ORDER_FLOW_TICKERS environment variable with a comma-separated list.
     """
+    # Check cache first
     now = time.time()
-
     with _SP500_CACHE_LOCK:
         if (
             _SP500_CACHE["tickers"]
             and isinstance(_SP500_CACHE["expires_at"], (int, float))
             and now < _SP500_CACHE["expires_at"]
         ):
-            return list(_SP500_CACHE["tickers"])  # copy
-
-    tickers: List[str] = []
-    if FINNHUB_API_KEY and FinnhubClient:
-        try:
-            tickers = _fetch_sp500_from_finnhub()
-        except Exception as exc:  # pragma: no cover - external service
-            logger.warning("Failed to refresh S&P 500 tickers from Finnhub: %s", exc)
-
-    if not tickers and POLYGON_API_KEY:
-        try:
-            tickers = _fetch_sp500_from_polygon()
-        except Exception as exc:  # pragma: no cover - external service
-            logger.warning("Failed to refresh S&P 500 tickers from Polygon: %s", exc)
-
-    if not tickers:
-        tickers = list(_FALLBACK_SP500)
-
+            return list(_SP500_CACHE["tickers"])
+    
+    # Use static fallback list (comprehensive S&P 500 subset)
+    tickers = list(_FALLBACK_SP500)
+    
+    # Update cache
     with _SP500_CACHE_LOCK:
         _SP500_CACHE["tickers"] = tickers
         _SP500_CACHE["expires_at"] = now + _SP500_CACHE_TTL_SECONDS
-
+    
     return tickers
 
 
-def get_major_forex_pairs() -> List[str]:
-    """Return the default universe of major forex pairs."""
-    return list(MAJOR_FOREX_PAIRS)
-
-
-def _fetch_sp500_from_polygon() -> List[str]:
-    """Fetch the latest S&P 500 list from Polygon Reference API."""
-    url = "https://api.polygon.io/v3/reference/tickers"
-    params = {
-        "market": "stocks",
-        "active": "true",
-        "limit": 1000,
-        "index": "sp500",
-        "apiKey": POLYGON_API_KEY,
-    }
-    tickers: List[str] = []
-    next_url: Optional[str] = url
-
-    while next_url:
-        response = requests.get(next_url, params=params if next_url == url else None, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        tickers.extend(result["ticker"] for result in data.get("results", []) if result.get("ticker"))
-        next_url = data.get("next_url")
-        if next_url:
-            # next_url may already contain the apiKey; ensure it's present
-            if "apiKey=" not in next_url:
-                next_url = f"{next_url}&apiKey={POLYGON_API_KEY}"
-        params = None  # only for first request
-
-    # Deduplicate and sort for stability
-    deduped = sorted({ticker.upper() for ticker in tickers})
-    return deduped
-
-
-def _fetch_sp500_from_finnhub() -> List[str]:
-    """Fetch the latest S&P 500 list from Finnhub index constituents API."""
-    if not FINNHUB_API_KEY:
-        return []
-    if not FinnhubClient:
-        raise RuntimeError("Finnhub client unavailable")
-
-    client = FinnhubClient(FINNHUB_API_KEY)
-    constituents = client.get_index_constituents("^GSPC")
-    # Finnhub includes ETFs like SPY; filter to uppercase alphabetic or dot tickers
-    cleaned = [ticker for ticker in constituents if ticker]
-    return sorted({ticker.upper() for ticker in cleaned})
 
 
 def _detect_instrument(ticker: str) -> str:

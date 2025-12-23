@@ -1,81 +1,100 @@
+"""
+Application settings and configuration.
+
+All configuration is loaded from environment variables via .env file.
+"""
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
-FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
+# ============================================================================
+# Schwab Streaming API Configuration
+# ============================================================================
+SCHWAB_APP_KEY = os.getenv("SCHWAB_APP_KEY")
+SCHWAB_APP_SECRET = os.getenv("SCHWAB_APP_SECRET")
+SCHWAB_CALLBACK_URL = os.getenv("SCHWAB_CALLBACK_URL", "http://localhost")
 
-MASTER_API_TOKEN = os.getenv("MASTER_API_TOKEN")
-# CORS origins - provide sensible defaults if not set
-# Handle errors gracefully to prevent app crashes
-try:
-    _cors_origins_str = os.getenv("CORS_ALLOW_ORIGINS", "")
-    if not _cors_origins_str:
-        # Default to localhost + common Vercel pattern if not set
-        _cors_origins_str = "http://localhost:3000,http://127.0.0.1:3000,https://bot-trader-xi.vercel.app"
-        print("⚠ CORS_ALLOW_ORIGINS not set, using defaults")
-    
-    CORS_ALLOW_ORIGINS = [o.strip() for o in _cors_origins_str.split(",") if o.strip()]
-    # Ensure we always have at least localhost for development
-    if not CORS_ALLOW_ORIGINS:
-        CORS_ALLOW_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000", "https://bot-trader-xi.vercel.app"]
-    
-    print(f"✓ CORS origins configured: {len(CORS_ALLOW_ORIGINS)} origin(s)")
-    print(f"   Origins: {CORS_ALLOW_ORIGINS}")
-except Exception as e:
-    print(f"⚠ Warning: Error parsing CORS_ALLOW_ORIGINS: {e}")
-    print("   Using default origins")
-    CORS_ALLOW_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000", "https://bot-trader-xi.vercel.app"]
+if SCHWAB_APP_KEY and SCHWAB_APP_SECRET:
+    print("✓ Schwab Streaming API credentials loaded")
+else:
+    print("⚠ SCHWAB_APP_KEY and SCHWAB_APP_SECRET must be set for streaming")
 
-DATABASE_URL = os.getenv("DATABASE_URL")  # e.g., postgres://user:pass@host/db
-JWT_SECRET = os.getenv("JWT_SECRET", "change-me")
+# ============================================================================
+# Database Configuration
+# ============================================================================
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    print("⚠ DATABASE_URL not set - using SQLite fallback")
+    DATABASE_URL = "sqlite:///./app.db"
+
+# ============================================================================
+# Authentication & Security
+# ============================================================================
+JWT_SECRET = os.getenv("JWT_SECRET", "change-me-in-production")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_EXPIRES_MIN = int(os.getenv("JWT_EXPIRES_MIN", "60"))
 
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 
-if not POLYGON_API_KEY:
-    print("⚠ POLYGON_API_KEY not set (Polygon provider disabled unless FINNHUB is used)")
-else:
-    print("✓ POLYGON_API_KEY loaded from environment")
+MASTER_API_TOKEN = os.getenv("MASTER_API_TOKEN")
 
-if FINNHUB_API_KEY:
-    print("✓ FINNHUB_API_KEY loaded from environment")
+# ============================================================================
+# CORS Configuration
+# ============================================================================
+try:
+    _cors_origins_str = os.getenv("CORS_ALLOW_ORIGINS", "")
+    if not _cors_origins_str:
+        _cors_origins_str = "http://localhost:3000,http://127.0.0.1:3000"
+        print("⚠ CORS_ALLOW_ORIGINS not set, using defaults")
+    
+    CORS_ALLOW_ORIGINS = [o.strip() for o in _cors_origins_str.split(",") if o.strip()]
+    if not CORS_ALLOW_ORIGINS:
+        CORS_ALLOW_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    
+    print(f"✓ CORS origins configured: {len(CORS_ALLOW_ORIGINS)} origin(s)")
+except Exception as e:
+    print(f"⚠ Warning: Error parsing CORS_ALLOW_ORIGINS: {e}")
+    CORS_ALLOW_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
-# Polygon.io API Data Limits (days of historical data available per timeframe)
-# These can be adjusted based on your Polygon.io subscription tier
-# Free tier limits: 5m=30d, 15m=60d, 30m=90d, 1h=2y, 4h=2y, 1d=unlimited
-# Paid tiers may have extended limits
-POLYGON_DATA_LIMITS = {
-    "5m": int(os.getenv("POLYGON_LIMIT_5M", "30")),  # 5-minute: 30 days (free tier)
-    "15m": int(os.getenv("POLYGON_LIMIT_15M", "60")),  # 15-minute: 60 days (free tier)
-    "30m": int(os.getenv("POLYGON_LIMIT_30M", "90")),  # 30-minute: 90 days (free tier)
-    "1h": int(os.getenv("POLYGON_LIMIT_1H", "730")),  # 1-hour: ~2 years (730 days)
-    "4h": int(os.getenv("POLYGON_LIMIT_4H", "730")),  # 4-hour: ~2 years (730 days)
-    "1d": int(os.getenv("POLYGON_LIMIT_1D", "3650")),  # Daily: 10 years (can be extended)
-}
-
-
-# Order flow streamer configuration
+# ============================================================================
+# Alert Configuration
+# ============================================================================
 def _parse_bool(value: str | None, default: bool) -> bool:
+    """Parse boolean from environment variable."""
     if value is None:
         return default
     return value.strip().lower() in ("1", "true", "yes", "on")
 
 
-ORDER_FLOW_POLL_INTERVAL = int(os.getenv("ORDER_FLOW_POLL_INTERVAL", "60"))
-ORDER_FLOW_LOOKBACK_MINUTES = int(os.getenv("ORDER_FLOW_LOOKBACK_MINUTES", "5"))
-ORDER_FLOW_PROVIDER = os.getenv("ORDER_FLOW_PROVIDER", "polygon").lower()
-ORDER_FLOW_MAX_EQUITY_TICKERS = int(os.getenv("ORDER_FLOW_MAX_EQUITY_TICKERS", "40"))
-ORDER_FLOW_MAX_FOREX_TICKERS = int(os.getenv("ORDER_FLOW_MAX_FOREX_TICKERS", "10"))
-ORDER_FLOW_EQUITY_BATCH_SIZE = int(os.getenv("ORDER_FLOW_EQUITY_BATCH_SIZE", "20"))
-ORDER_FLOW_FOREX_BATCH_SIZE = int(os.getenv("ORDER_FLOW_FOREX_BATCH_SIZE", "5"))
-ORDER_FLOW_TIMEZONE = os.getenv("ORDER_FLOW_TIMEZONE", "America/New_York")
-ORDER_FLOW_EQUITY_SESSION = (
-    os.getenv("ORDER_FLOW_MARKET_START", "09:30"),
-    os.getenv("ORDER_FLOW_MARKET_END", "16:05"),
-)
-ORDER_FLOW_FOREX_SHUTDOWN_WEEKENDS = _parse_bool(os.getenv("ORDER_FLOW_FOREX_SHUTDOWN_WEEKENDS"), True)
-ORDER_FLOW_HEARTBEAT_MINUTES = int(os.getenv("ORDER_FLOW_HEARTBEAT_MINUTES", "10"))
+# Email Alerts
+ALERT_EMAIL_ENABLED = _parse_bool(os.getenv("ALERT_EMAIL_ENABLED"), False)
+ALERT_EMAIL_SMTP_HOST = os.getenv("ALERT_EMAIL_SMTP_HOST")
+ALERT_EMAIL_SMTP_PORT = int(os.getenv("ALERT_EMAIL_SMTP_PORT", "587"))
+ALERT_EMAIL_SMTP_USER = os.getenv("ALERT_EMAIL_SMTP_USER")
+ALERT_EMAIL_SMTP_PASSWORD = os.getenv("ALERT_EMAIL_SMTP_PASSWORD")
+ALERT_EMAIL_FROM = os.getenv("ALERT_EMAIL_FROM")
+ALERT_EMAIL_TO = os.getenv("ALERT_EMAIL_TO")
+
+# SMS Alerts
+ALERT_SMS_ENABLED = _parse_bool(os.getenv("ALERT_SMS_ENABLED"), False)
+ALERT_SMS_PROVIDER = os.getenv("ALERT_SMS_PROVIDER", "twilio").lower()
+
+# Twilio SMS
+ALERT_SMS_TWILIO_ACCOUNT_SID = os.getenv("ALERT_SMS_TWILIO_ACCOUNT_SID")
+ALERT_SMS_TWILIO_AUTH_TOKEN = os.getenv("ALERT_SMS_TWILIO_AUTH_TOKEN")
+ALERT_SMS_TWILIO_FROM = os.getenv("ALERT_SMS_TWILIO_FROM")
+ALERT_SMS_TO = os.getenv("ALERT_SMS_TO")
+
+# Email-to-SMS Gateway (free alternative)
+ALERT_SMS_EMAIL_GATEWAY = os.getenv("ALERT_SMS_EMAIL_GATEWAY")
+
+# ============================================================================
+# Streamer Configuration
+# ============================================================================
+# Minimum order size to trigger whale alert (in USD)
+MIN_ORDER_SIZE_USD = float(os.getenv("MIN_ORDER_SIZE_USD", "500000"))
+
+# Custom watchlist (optional - defaults to S&P 500)
+ORDER_FLOW_TICKERS = os.getenv("ORDER_FLOW_TICKERS")  # Comma-separated list
