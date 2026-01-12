@@ -9,3 +9,8 @@ schwab-py==1.5.1
 # HTTP Requests
 requests==2.31.0
 
+# Database
+psycopg2-binary==2.9.11
+
+# Email notifications (included in standard library, no package needed)
+
