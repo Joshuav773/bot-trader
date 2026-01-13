@@ -1,211 +1,110 @@
-# Bot Trader - Whale Order Watcher
+# Bot Trader
 
-**State-of-the-art real-time whale order detection system powered by Schwab Streaming API.**
+Simple FastAPI backend with Schwab streaming integration.
 
-A clean, production-ready FastAPI + Next.js application that streams real-time market data from Schwab to detect and alert on large institutional trades (≥ $500k).
+## Features
 
----
+- **FastAPI Backend**: Clean REST API
+- **Schwab Streaming**: Real-time market data streaming
+- **Simple Architecture**: Minimal dependencies, easy to understand
 
-## 🎯 Core Features
+## Quick Start
 
-- **Real-time Streaming**: WebSocket-based streaming via Schwab API for instant whale detection
-- **Whale Detection**: Automatically captures trades ≥ $500k with sub-second latency
-- **Real-time Alerts**: Email and SMS notifications when whales are detected
-- **Secure API**: JWT-based authentication with admin dashboard
-- **Clean Architecture**: Schwab-only, no unnecessary dependencies
-- **Production Ready**: Docker-first, ready for deployment
+### 1. Install Dependencies
 
----
+```bash
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-## 🏗️ Architecture
+# Install requirements
+pip install -r requirements.txt
+```
+
+### 2. Configure Environment
+
+```bash
+# Copy example .env file
+cp .env.example .env
+
+# Edit .env and add your Schwab API credentials
+# Get them from: https://developer.schwab.com
+```
+
+### 3. Get Schwab API Token
+
+First time only - this will open a browser for OAuth:
+
+```bash
+# The streamer will automatically prompt for OAuth on first run
+# OR create token manually by running:
+python3 schwab_streamer.py
+```
+
+After OAuth completes, `token.json` will be created. This file allows automatic authentication without browser in the future.
+
+### 4. Run Services
+
+```bash
+# Run both FastAPI server and Schwab streamer
+python3 start.py
+
+# Or run separately:
+# Terminal 1: FastAPI server
+uvicorn main:app --reload
+
+# Terminal 2: Schwab streamer
+python3 schwab_streamer.py
+```
+
+### 5. Access API
+
+- **API**: http://localhost:8000
+- **Health**: http://localhost:8000/health
+- **Status**: http://localhost:8000/api/status
+- **Docs**: http://localhost:8000/docs
+
+## Project Structure
 
 ```
 bot-trader/
-├── api/                      # FastAPI backend
-│   ├── main.py               # App bootstrap
-│   ├── db.py                 # Database connection
-│   ├── models.py             # User, OrderFlow models
-│   ├── security.py           # JWT authentication
-│   └── routers/
-│       ├── auth.py           # Login endpoint
-│       └── orderflow.py      # Whale order queries
-├── data_ingestion/
-│   └── schwab_stream_client.py  # Real-time streaming client
-├── order_flow/
-│   ├── aggregator.py         # Trade processing & filtering
-│   └── alerts.py             # Email/SMS alert system
-├── config/
-│   └── settings.py           # Configuration management
-└── frontend/                 # Next.js dashboard
+├── main.py              # FastAPI application
+├── schwab_streamer.py   # Schwab streaming client
+├── start.py             # Startup script (runs both services)
+├── requirements.txt     # Python dependencies
+├── .env.example         # Environment variables template
+└── README.md            # This file
 ```
 
----
+## Environment Variables
 
-## 🚀 Quick Start
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `SCHWAB_APP_KEY` | Schwab API App Key | Yes |
+| `SCHWAB_APP_SECRET` | Schwab API App Secret | Yes |
+| `SCHWAB_CALLBACK_URL` | OAuth callback URL (default: http://127.0.0.1) | No |
+| `PORT` | FastAPI server port (default: 8000) | No |
+| `HOST` | FastAPI server host (default: 0.0.0.0) | No |
 
-### Prerequisites
+## Token Management
 
-- Python 3.12+
-- Node.js 18+
-- Schwab Developer Portal account (free for Schwab account holders)
-- PostgreSQL database (Neon recommended for free tier)
+- **First Run**: OAuth flow will open browser for authorization
+- **After First Run**: `token.json` contains refresh token, no browser needed
+- **Automatic Refresh**: `schwab-py` automatically refreshes expired tokens
+- **Production**: Use `SCHWAB_TOKEN_JSON` environment variable instead of file
 
-### Installation
+## Development
 
 ```bash
-# Clone repository
-git clone <your-repo>
-cd bot-trader
-
-# Backend setup
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+# Install dev dependencies (if any)
 pip install -r requirements.txt
 
-# Frontend setup
-cd frontend
-npm install
-cd ..
+# Run with auto-reload
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Configuration
+## License
 
-Create `.env` file:
+MIT
 
-```bash
-# Schwab Streaming API (Required)
-SCHWAB_APP_KEY=your_app_key
-SCHWAB_APP_SECRET=your_app_secret
-SCHWAB_CALLBACK_URL=http://localhost
 
-# Database
-DATABASE_URL=postgresql+psycopg://user:pass@host/db
-
-# Authentication
-JWT_SECRET=your-secret-key-change-in-production
-ADMIN_EMAIL=admin@example.com
-ADMIN_PASSWORD=SecurePassword123
-
-# CORS (for frontend)
-CORS_ALLOW_ORIGINS=http://localhost:3000
-
-# Alerts (Optional)
-ALERT_EMAIL_ENABLED=true
-ALERT_EMAIL_SMTP_HOST=smtp.gmail.com
-ALERT_EMAIL_SMTP_PORT=587
-ALERT_EMAIL_SMTP_USER=your_email@gmail.com
-ALERT_EMAIL_SMTP_PASSWORD=your_app_password
-ALERT_EMAIL_FROM=your_email@gmail.com
-ALERT_EMAIL_TO=recipient@example.com
-
-ALERT_SMS_ENABLED=true
-ALERT_SMS_PROVIDER=email_gateway
-ALERT_SMS_EMAIL_GATEWAY=1234567890@vtext.com
-```
-
-### Run
-
-```bash
-# Terminal 1: Start backend
-python start_server.py
-
-# Terminal 2: Start streamer
-python -m data_ingestion.schwab_stream_client
-
-# Terminal 3: Start frontend
-cd frontend
-npm run dev
-```
-
-Visit `http://localhost:3000` and log in with your admin credentials.
-
----
-
-## 📚 Setup Guides
-
-### Schwab API Setup
-
-See **[SCHWAB_STREAM_SETUP.md](./SCHWAB_STREAM_SETUP.md)** for:
-- Creating Schwab Developer Portal app
-- OAuth authorization flow
-- Token management
-- Troubleshooting
-
-### Alert Configuration
-
-See **[ALERTS_SETUP.md](./ALERTS_SETUP.md)** for:
-- Email alerts (Gmail, SendGrid, etc.)
-- SMS alerts (Twilio, email-to-SMS gateways)
-- Configuration examples
-
----
-
-## 🎯 How It Works
-
-1. **Streaming**: Connects to Schwab WebSocket API for real-time level-one equity data
-2. **Detection**: Calculates `Trade Value = Price × Size` for each trade
-3. **Filtering**: Saves trades where `Trade Value ≥ $500,000`
-4. **Alerts**: Sends email/SMS notifications immediately
-5. **Storage**: Saves to PostgreSQL for historical analysis
-
----
-
-## 📊 API Endpoints
-
-### Authentication
-- `POST /auth/login` - Admin login
-
-### Order Flow
-- `GET /order-flow/large-orders` - Query whale orders
-  - Query params: `ticker`, `order_type`, `order_side`, `instrument`, `hours`
-
----
-
-## 🛠️ Technology Stack
-
-- **Backend**: FastAPI, SQLModel, PostgreSQL
-- **Streaming**: schwab-py library (WebSocket)
-- **Frontend**: Next.js 14, TypeScript, Tailwind CSS
-- **Alerts**: SMTP (email), Twilio/Email Gateway (SMS)
-- **Deployment**: Docker, Azure Container Apps
-
----
-
-## 📦 Dependencies
-
-Minimal, production-focused dependencies:
-- `fastapi` - Web framework
-- `schwab-py` - Schwab API client
-- `sqlmodel` - Database ORM
-- `pandas` - Data processing
-- `requests` - HTTP client (for alerts)
-
-No heavy ML libraries, no unnecessary data providers.
-
----
-
-## 🔒 Security
-
-- JWT-based authentication
-- Password hashing with bcrypt
-- CORS protection
-- Environment variable secrets
-- Database connection pooling
-
----
-
-## 📝 License
-
-[Your License Here]
-
----
-
-## 🤝 Contributing
-
-[Your Contributing Guidelines]
-
----
-
-## 📞 Support
-
-[Your Support Information]

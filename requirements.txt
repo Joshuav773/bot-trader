@@ -1,26 +1,16 @@
 # Core Framework
-fastapi
-uvicorn[standard]
-python-dotenv
-
-# Database
-sqlmodel
-SQLAlchemy
-psycopg[binary]  # PostgreSQL adapter
-
-# Authentication & Security
-passlib[bcrypt]
-PyJWT
-
-# Data Processing
-pandas
-numpy
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-dotenv==1.0.0
 
 # Schwab API
-schwab-py
+schwab-py==1.5.1
 
-# Email Validation
-email-validator
+# HTTP Requests
+requests==2.31.0
 
-# HTTP Requests (for alerts)
-requests
+# Database
+psycopg2-binary==2.9.11
+
+# Email notifications (included in standard library, no package needed)
+
