@@ -378,16 +378,116 @@ class SchwabStreamer:
             logger.info("   Press Ctrl+C to stop")
             logger.info("")
             
-            # Handle messages in a loop
-            while self.running:
-                await self.stream_client.handle_message()
+            # Handle messages in a loop with infinite reconnection logic
+            reconnect_delay = 5  # seconds
+            reconnect_attempts = 0
+            last_message_time = datetime.now(timezone.utc)
+            last_connection_time = datetime.now(timezone.utc)
             
-        except Exception as e:
-            logger.error(f"Streaming error: {e}", exc_info=True)
+            while self.running:
+                try:
+                    await self.stream_client.handle_message()
+                    # Reset reconnect attempts on successful message
+                    reconnect_attempts = 0
+                    last_message_time = datetime.now(timezone.utc)
+                except Exception as e:
+                    error_type = type(e).__name__
+                    error_msg = str(e)
+                    
+                    # Check if it's a connection error
+                    if "ConnectionClosed" in error_type or "IncompleteRead" in error_type or "WebSocket" in error_type:
+                        reconnect_attempts += 1
+                        
+                        # Calculate time since last message to diagnose idle timeout
+                        time_since_last_msg = (datetime.now(timezone.utc) - last_message_time).total_seconds()
+                        time_since_connection = (datetime.now(timezone.utc) - last_connection_time).total_seconds()
+                        
+                        # Log diagnostic information
+                        logger.warning("=" * 80)
+                        logger.warning(f"⚠️  CONNECTION DROPPED - Diagnostic Info:")
+                        logger.warning(f"   Error Type: {error_type}")
+                        logger.warning(f"   Error Message: {error_msg}")
+                        logger.warning(f"   Time since last message: {time_since_last_msg:.1f} seconds ({time_since_last_msg/60:.1f} minutes)")
+                        logger.warning(f"   Time since connection: {time_since_connection:.1f} seconds ({time_since_connection/60:.1f} minutes)")
+                        
+                        if time_since_last_msg > 1800:  # 30 minutes
+                            logger.warning(f"   🔍 Likely cause: IDLE TIMEOUT (>30 min without data)")
+                        elif time_since_last_msg > 300:  # 5 minutes
+                            logger.warning(f"   🔍 Possible cause: Idle connection (no data for {time_since_last_msg/60:.1f} min)")
+                        else:
+                            logger.warning(f"   🔍 Likely cause: Network/server issue (was receiving data)")
+                        
+                        logger.warning(f"   Reconnect attempt: {reconnect_attempts} (unlimited)")
+                        logger.warning("=" * 80)
+                        
+                        # Clean up old connection
+                        if self.stream_client:
+                            try:
+                                await self.stream_client.logout()
+                            except:
+                                pass
+                        
+                        # Exponential backoff: 5s, 10s, 20s, 30s, then 30s max
+                        backoff_delay = min(reconnect_delay * (2 ** min(reconnect_attempts - 1, 3)), 30)
+                        logger.info(f"⏳ Waiting {backoff_delay} seconds before reconnect...")
+                        await asyncio.sleep(backoff_delay)
+                        
+                        try:
+                            # Reinitialize stream client
+                            self.stream_client = StreamClient(
+                                client=self.client,
+                                account_id=None,
+                                enforce_enums=False,
+                            )
+                            
+                            # Re-register message handler
+                            self.stream_client.add_level_one_equity_handler(self.process_quote)
+                            
+                            # Re-login
+                            logger.info("🔄 Reconnecting to stream...")
+                            await self.stream_client.login()
+                            logger.info("✅ Reconnected successfully")
+                            last_connection_time = datetime.now(timezone.utc)
+                            
+                            # Re-subscribe to all symbols
+                            logger.info(f"📡 Re-subscribing to {len(self.symbols)} symbols...")
+                            batch_size = 100
+                            for i in range(0, len(self.symbols), batch_size):
+                                batch = self.symbols[i:i+batch_size]
+                                await self.stream_client.level_one_equity_subs(
+                                    symbols=batch,
+                                    fields=[0, 1, 2, 3, 4, 5, 6, 8]
+                                )
+                                if i + batch_size < len(self.symbols):
+                                    await asyncio.sleep(0.5)
+                            
+                            logger.info("✅ Re-subscription complete - Resuming stream...")
+                            # Continue loop to handle messages
+                            continue
+                            
+                        except Exception as reconnect_error:
+                            logger.error(f"❌ Reconnection failed: {reconnect_error}")
+                            logger.error(f"   Will retry in {backoff_delay} seconds...")
+                            # Continue loop to retry (infinite retries)
+                            continue
+                    else:
+                        # Other errors - log and continue if possible
+                        logger.warning(f"⚠️  Streaming error (non-connection): {e}")
+                        # Small delay before continuing to avoid tight error loop
+                        await asyncio.sleep(1)
+            
+        except KeyboardInterrupt:
+            logger.info("\n🛑 Stream interrupted by user")
             self.running = False
+        except Exception as e:
+            logger.error(f"❌ Fatal streaming error: {e}", exc_info=True)
+            self.running = False
+        finally:
+            # Clean up on exit
             if self.stream_client:
                 try:
                     await self.stream_client.logout()
+                    logger.info("✅ Stream disconnected cleanly")
                 except:
                     pass
     
