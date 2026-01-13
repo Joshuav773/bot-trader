@@ -338,6 +338,7 @@ class SchwabStreamer:
             self.stream_client = StreamClient(
                 client=self.client,
                 account_id=None,  # Not needed for market data
+                enforce_enums=False,  # Allow integer field IDs instead of enum types
             )
             
             logger.info("🔌 Initializing stream client...")
