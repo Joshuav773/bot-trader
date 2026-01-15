@@ -272,3 +272,4 @@ aws secretsmanager get-secret-value --secret-id bot-trader/secrets
 - Configure auto-scaling if needed
 
 
+

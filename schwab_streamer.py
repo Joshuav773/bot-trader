@@ -48,6 +48,14 @@ except ImportError:
     TRADE_TRACKER_AVAILABLE = False
     logging.warning("Trade tracker module not available - large trades will not be tracked")
 
+# Import order tracker module
+try:
+    from order_tracker import LargeOrderTracker
+    ORDER_TRACKER_AVAILABLE = True
+except ImportError:
+    ORDER_TRACKER_AVAILABLE = False
+    logging.warning("Order tracker module not available - large orders will not be tracked")
+
 # Configure verbose logging
 logging.basicConfig(
     level=logging.INFO,
@@ -100,9 +108,16 @@ class SchwabStreamer:
         self.quote_count = {}
         self.db = get_db() if DB_AVAILABLE else None
         self.notification_service = get_notification_service() if NOTIFICATIONS_AVAILABLE else None
-        self.trade_tracker = LargeTradeTracker(min_trade_value=200000.0) if TRADE_TRACKER_AVAILABLE else None
+        self.trade_tracker = LargeTradeTracker(min_trade_value=50000.0) if TRADE_TRACKER_AVAILABLE else None
+        self.order_tracker = LargeOrderTracker(min_order_value=50000.0) if ORDER_TRACKER_AVAILABLE else None
         self.notifications_sent = 0
         self.large_trades_saved = 0
+        self.large_orders_saved = 0
+        self.all_orders_saved = 0
+        
+        # Configuration: Scan ALL orders or just large ones?
+        # Set to True to scan and save EVERY order from the order book
+        self.scan_all_orders = os.getenv("SCAN_ALL_ORDERS", "false").lower() == "true"
         
     def authenticate(self) -> bool:
         """
@@ -216,6 +231,221 @@ class SchwabStreamer:
             logger.error(f"Authentication failed: {e}", exc_info=True)
             return False
     
+    def process_order_book(self, msg):
+        """Process incoming order book data - scan ALL orders at each price level"""
+        try:
+            # Parse message structure
+            if isinstance(msg, dict):
+                service = msg.get('service', '')
+                
+                # Handle NASDAQ order book
+                if service == 'NASDAQ_BOOK':
+                    content = msg.get('content', [])
+                    for item in content:
+                        if isinstance(item, dict):
+                            symbol = item.get('key', item.get('0', ''))  # BookFields.SYMBOL = 0
+                            bids = item.get('1', [])  # BookFields.BIDS = 1
+                            asks = item.get('2', [])  # BookFields.ASKS = 2
+                            book_time = item.get('3', None)  # BookFields.BOOK_TIME = 3
+                            
+                            self.scan_order_book(symbol, bids, asks, book_time, 'NASDAQ')
+                
+                # Handle NYSE order book
+                elif service == 'NYSE_BOOK':
+                    content = msg.get('content', [])
+                    for item in content:
+                        if isinstance(item, dict):
+                            symbol = item.get('key', item.get('0', ''))
+                            bids = item.get('1', [])
+                            asks = item.get('2', [])
+                            book_time = item.get('3', None)
+                            
+                            self.scan_order_book(symbol, bids, asks, book_time, 'NYSE')
+                
+                # Handle Options order book
+                elif service == 'OPTIONS_BOOK':
+                    content = msg.get('content', [])
+                    for item in content:
+                        if isinstance(item, dict):
+                            symbol = item.get('key', item.get('0', ''))
+                            bids = item.get('1', [])
+                            asks = item.get('2', [])
+                            book_time = item.get('3', None)
+                            
+                            self.scan_order_book(symbol, bids, asks, book_time, 'OPTIONS')
+                            
+        except Exception as e:
+            logger.error(f"Error processing order book: {e}", exc_info=True)
+    
+    def scan_order_book(self, symbol: str, bids: list, asks: list, book_time, exchange: str):
+        """
+        Scan order book to find ALL orders at each price level
+        
+        If SCAN_ALL_ORDERS=true, saves EVERY order (regardless of size).
+        Otherwise, only saves large orders (>= $50k).
+        
+        Args:
+            symbol: Stock/option symbol
+            bids: List of bid orders [{'price': X, 'size': Y}, ...]
+            asks: List of ask orders [{'price': X, 'size': Y}, ...]
+            book_time: Timestamp of order book snapshot
+            exchange: Exchange name (NASDAQ, NYSE, OPTIONS)
+        """
+        if not symbol:
+            return
+        
+        # Handle empty bid/ask lists
+        bids = bids or []
+        asks = asks or []
+        
+        try:
+            orders_scanned = 0
+            orders_saved = 0
+            
+            # Scan all bid orders (buy orders)
+            for bid_order in bids:
+                if isinstance(bid_order, dict):
+                    price = bid_order.get('price')
+                    size = bid_order.get('size', bid_order.get('quantity', 0))
+                    
+                    if price and size:
+                        try:
+                            price_float = float(price)
+                            size_int = int(size)
+                            order_value = price_float * size_int
+                            orders_scanned += 1
+                            
+                            # Create order data
+                            order_data = {
+                                'symbol': symbol,
+                                'order_type': 'BUY_ORDER',
+                                'order_side': 'BUY',
+                                'order_value_usd': order_value,
+                                'price': price_float,
+                                'order_size_shares': size_int,
+                                'timestamp': datetime.now(timezone.utc),
+                                'instrument': 'equity' if exchange != 'OPTIONS' else 'option',
+                                'detection_method': 'ORDER_BOOK_BID',
+                                'exchange': exchange,
+                                'book_time': book_time,
+                                'price_level': 'BID',
+                            }
+                            
+                            # Determine if we should save this order
+                            should_save = False
+                            is_large = order_value >= (self.order_tracker.min_order_value if self.order_tracker else 50000.0)
+                            
+                            if self.scan_all_orders:
+                                # Save ALL orders when scan_all_orders is enabled
+                                should_save = True
+                            elif is_large:
+                                # Save only large orders when scan_all_orders is disabled
+                                should_save = True
+                            
+                            if should_save and self.db:
+                                if self.scan_all_orders:
+                                    # Save all orders using save_all_order
+                                    if self.db.save_all_order(order_data):
+                                        orders_saved += 1
+                                        self.all_orders_saved += 1
+                                else:
+                                    # Save large orders using save_large_order
+                                    if self.db.save_large_order(order_data):
+                                        orders_saved += 1
+                                        self.large_orders_saved += 1
+                                        logger.info(
+                                            f"📋 Large BUY order in book: {symbol} | "
+                                            f"Value: ${order_value:,.2f} | "
+                                            f"Size: {size_int:,} @ ${price_float:.2f} | "
+                                            f"Exchange: {exchange}"
+                                        )
+                                        
+                                        # Send notification for large orders only
+                                        if self.notification_service:
+                                            sent = self.notification_service.send_order_notification(order_data)
+                                            if sent > 0:
+                                                self.notifications_sent += sent
+                        except (ValueError, TypeError) as e:
+                            continue
+            
+            # Scan all ask orders (sell orders)
+            for ask_order in asks:
+                if isinstance(ask_order, dict):
+                    price = ask_order.get('price')
+                    size = ask_order.get('size', ask_order.get('quantity', 0))
+                    
+                    if price and size:
+                        try:
+                            price_float = float(price)
+                            size_int = int(size)
+                            order_value = price_float * size_int
+                            orders_scanned += 1
+                            
+                            # Create order data
+                            order_data = {
+                                'symbol': symbol,
+                                'order_type': 'SELL_ORDER',
+                                'order_side': 'SELL',
+                                'order_value_usd': order_value,
+                                'price': price_float,
+                                'order_size_shares': size_int,
+                                'timestamp': datetime.now(timezone.utc),
+                                'instrument': 'equity' if exchange != 'OPTIONS' else 'option',
+                                'detection_method': 'ORDER_BOOK_ASK',
+                                'exchange': exchange,
+                                'book_time': book_time,
+                                'price_level': 'ASK',
+                            }
+                            
+                            # Determine if we should save this order
+                            should_save = False
+                            is_large = order_value >= (self.order_tracker.min_order_value if self.order_tracker else 50000.0)
+                            
+                            if self.scan_all_orders:
+                                # Save ALL orders when scan_all_orders is enabled
+                                should_save = True
+                            elif is_large:
+                                # Save only large orders when scan_all_orders is disabled
+                                should_save = True
+                            
+                            if should_save and self.db:
+                                if self.scan_all_orders:
+                                    # Save all orders using save_all_order
+                                    if self.db.save_all_order(order_data):
+                                        orders_saved += 1
+                                        self.all_orders_saved += 1
+                                else:
+                                    # Save large orders using save_large_order
+                                    if self.db.save_large_order(order_data):
+                                        orders_saved += 1
+                                        self.large_orders_saved += 1
+                                        logger.info(
+                                            f"📋 Large SELL order in book: {symbol} | "
+                                            f"Value: ${order_value:,.2f} | "
+                                            f"Size: {size_int:,} @ ${price_float:.2f} | "
+                                            f"Exchange: {exchange}"
+                                        )
+                                        
+                                        # Send notification for large orders only
+                                        if self.notification_service:
+                                            sent = self.notification_service.send_order_notification(order_data)
+                                            if sent > 0:
+                                                self.notifications_sent += sent
+                        except (ValueError, TypeError) as e:
+                            continue
+            
+            # Log summary if scanning all orders
+            if self.scan_all_orders and orders_scanned > 0:
+                logger.debug(
+                    f"📊 Order book scan: {symbol} | "
+                    f"Scanned: {orders_scanned} orders | "
+                    f"Saved: {orders_saved} orders | "
+                    f"Exchange: {exchange}"
+                )
+                            
+        except Exception as e:
+            logger.error(f"Error scanning order book for {symbol}: {e}", exc_info=True)
+    
     def process_quote(self, msg):
         """Process incoming quote data - track large trades only"""
         try:
@@ -255,33 +485,70 @@ class SchwabStreamer:
                                 'volume': volume,
                             }
                             
-                            # Track large trades only (>= $200k)
+                            # Track large orders (>= $50k) - Enhanced multi-signal detection
+                            if self.order_tracker:
+                                large_order = self.order_tracker.process_quote(quote_data)
+                                if large_order:
+                                    # Save large order to database
+                                    if self.db and self.db.save_large_order(large_order):
+                                        self.large_orders_saved += 1
+                                        
+                                        # Get detection method for logging
+                                        detection_method = large_order.get('detection_method', 'UNKNOWN')
+                                        
+                                        logger.info(
+                                            f"📋 Large {large_order.get('order_type')} order detected ({detection_method}): {symbol} | "
+                                            f"Value: ${large_order.get('order_value_usd', 0):,.2f} | "
+                                            f"Size: {large_order.get('order_size_shares', 0):,} shares @ ${large_order.get('price')} | "
+                                            f"Instrument: {large_order.get('instrument', 'equity')}"
+                                        )
+                                        
+                                        # Send email notification for large orders
+                                        if self.notification_service:
+                                            sent = self.notification_service.send_order_notification(large_order)
+                                            if sent > 0:
+                                                self.notifications_sent += sent
+                            
+                            # Track large trades (>= $50k) - Enhanced volume spike detection
                             if self.trade_tracker:
                                 large_trade = self.trade_tracker.process_quote(quote_data)
                                 if large_trade:
                                     # Save large trade to database
                                     if self.db and self.db.save_large_trade(large_trade):
                                         self.large_trades_saved += 1
+                                        
+                                        # Get detection method for logging
+                                        detection_method = large_trade.get('detection_method', 'UNKNOWN')
+                                        
                                         logger.info(
-                                            f"💰 Large trade detected: {symbol} | "
+                                            f"💰 Large trade detected ({detection_method}): {symbol} | "
                                             f"Value: ${large_trade.get('trade_value_usd', 0):,.2f} | "
                                             f"Entry: ${large_trade.get('entry_price')} → Exit: ${large_trade.get('exit_price')} | "
                                             f"Vol: {large_trade.get('volume', 0):,}"
                                         )
                                         
-                                        # Send email notification for large trades only
+                                        # Send email notification for large trades
                                         if self.notification_service:
-                                            sent = self.notification_service.send_quote_notification(quote_data)
+                                            sent = self.notification_service.send_large_trade_notification(large_trade)
                                             if sent > 0:
                                                 self.notifications_sent += sent
                             
                             # Log status every 100 messages (minimal logging)
                             if self.message_count % 100 == 0:
-                                status_msg = (
-                                    f"📈 Status: {self.message_count} messages processed | "
-                                    f"Large trades detected: {self.large_trades_saved} | "
-                                    f"Symbols tracked: {len(self.quote_count)}"
-                                )
+                                if self.scan_all_orders:
+                                    status_msg = (
+                                        f"📈 Status: {self.message_count} messages processed | "
+                                        f"All orders saved: {self.all_orders_saved} | "
+                                        f"Large trades: {self.large_trades_saved} | "
+                                        f"Symbols tracked: {len(self.quote_count)}"
+                                    )
+                                else:
+                                    status_msg = (
+                                        f"📈 Status: {self.message_count} messages processed | "
+                                        f"Large orders: {self.large_orders_saved} | "
+                                        f"Large trades: {self.large_trades_saved} | "
+                                        f"Symbols tracked: {len(self.quote_count)}"
+                                    )
                                 logger.info(status_msg)
         except Exception as e:
             logger.warning(f"⚠️  Error processing quote: {e}")
@@ -301,7 +568,7 @@ class SchwabStreamer:
             logger.info("=" * 80)
             logger.info(f"📋 Configuration:")
             logger.info(f"   Symbols: {len(self.symbols)} stocks")
-            logger.info(f"   Mode: Real-time Level 1 quotes")
+            logger.info(f"   Mode: Real-time Level 1 quotes + Order Book (Level 2)")
             logger.info(f"   Session: NY market hours (9:30 AM - 4:00 PM ET)")
             logger.info(f"   Symbols: {', '.join(self.symbols[:10])}..." if len(self.symbols) > 10 else f"   Symbols: {', '.join(self.symbols)}")
             logger.info("")
@@ -326,6 +593,13 @@ class SchwabStreamer:
             else:
                 logger.info("📧 Email notifications not configured - GMAIL_USER and GMAIL_PASSWORD required")
             
+            # Initialize order tracker
+            if self.order_tracker:
+                logger.info(f"📋 Large order tracking enabled (>= ${self.order_tracker.min_order_value:,.0f})")
+                logger.info(f"   Tracks: Stocks and Options contracts")
+            else:
+                logger.warning("⚠️  Order tracker not available - large orders will not be tracked")
+            
             # Initialize trade tracker
             if self.trade_tracker:
                 logger.info(f"💰 Large trade tracking enabled (>= ${self.trade_tracker.min_trade_value:,.0f})")
@@ -344,9 +618,21 @@ class SchwabStreamer:
             logger.info("🔌 Initializing stream client...")
             self.running = True
             
-            # Register message handler
+            # Register message handlers
             self.stream_client.add_level_one_equity_handler(self.process_quote)
-            logger.info("✅ Message handler registered")
+            
+            # Register order book handlers (Level 2 - full order book data)
+            self.stream_client.add_nasdaq_book_handler(self.process_order_book)
+            self.stream_client.add_nyse_book_handler(self.process_order_book)
+            self.stream_client.add_options_book_handler(self.process_order_book)
+            
+            logger.info("✅ Message handlers registered (Level 1 + Order Book)")
+            
+            # Log scanning mode
+            if self.scan_all_orders:
+                logger.info("🔍 Mode: Scanning ALL orders from order book (every order will be saved)")
+            else:
+                logger.info("🔍 Mode: Scanning LARGE orders only (>= $50k)")
             
             # Login to stream
             logger.info("🔐 Connecting to Schwab streaming API...")
@@ -362,19 +648,38 @@ class SchwabStreamer:
             batch_size = 100
             for i in range(0, len(self.symbols), batch_size):
                 batch = self.symbols[i:i+batch_size]
+                
+                # Subscribe to Level 1 quotes (top of book)
                 await self.stream_client.level_one_equity_subs(
                     symbols=batch,
                     fields=[0, 1, 2, 3, 4, 5, 6, 8]  # Symbol, Bid, Ask, Last, Bid Size, Ask Size, Volume
                 )
-                logger.info(f"   ✅ Subscribed to batch {i//batch_size + 1} ({len(batch)} symbols)")
+                
+                # Subscribe to order book (Level 2 - ALL orders at each price level)
+                # This gives us EVERY order, not just top bid/ask
+                try:
+                    # Try NASDAQ book first (most stocks are NASDAQ)
+                    await self.stream_client.nasdaq_book_subs(symbols=batch)
+                    logger.info(f"   ✅ Subscribed Level 1 + Order Book for batch {i//batch_size + 1} ({len(batch)} symbols)")
+                except Exception as e:
+                    # If NASDAQ fails, try NYSE
+                    try:
+                        await self.stream_client.nyse_book_subs(symbols=batch)
+                        logger.info(f"   ✅ Subscribed Level 1 + Order Book (NYSE) for batch {i//batch_size + 1} ({len(batch)} symbols)")
+                    except Exception as e2:
+                        logger.warning(f"   ⚠️  Order book subscription failed for batch {i//batch_size + 1}: {e2}")
+                        logger.info(f"   ✅ Subscribed Level 1 only for batch {i//batch_size + 1} ({len(batch)} symbols)")
+                
                 if i + batch_size < len(self.symbols):
                     await asyncio.sleep(0.5)  # Small delay between batches
             
             logger.info("")
             logger.info("=" * 80)
             logger.info(f"✅ Subscribed to all {len(self.symbols)} symbols")
+            logger.info("   📊 Level 1: Top bid/ask quotes")
+            logger.info("   📚 Order Book: ALL orders at each price level")
             logger.info("=" * 80)
-            logger.info("📈 STREAMING ACTIVE - Real-time quotes are being collected")
+            logger.info("📈 STREAMING ACTIVE - Scanning EVERY order in real-time")
             logger.info("   Press Ctrl+C to stop")
             logger.info("")
             
@@ -449,15 +754,27 @@ class SchwabStreamer:
                             logger.info("✅ Reconnected successfully")
                             last_connection_time = datetime.now(timezone.utc)
                             
-                            # Re-subscribe to all symbols
+                            # Re-subscribe to all symbols (Level 1 + Order Book)
                             logger.info(f"📡 Re-subscribing to {len(self.symbols)} symbols...")
                             batch_size = 100
                             for i in range(0, len(self.symbols), batch_size):
                                 batch = self.symbols[i:i+batch_size]
+                                
+                                # Re-subscribe to Level 1
                                 await self.stream_client.level_one_equity_subs(
                                     symbols=batch,
                                     fields=[0, 1, 2, 3, 4, 5, 6, 8]
                                 )
+                                
+                                # Re-subscribe to order book
+                                try:
+                                    await self.stream_client.nasdaq_book_subs(symbols=batch)
+                                except:
+                                    try:
+                                        await self.stream_client.nyse_book_subs(symbols=batch)
+                                    except:
+                                        pass  # Order book may not be available for all symbols
+                                
                                 if i + batch_size < len(self.symbols):
                                     await asyncio.sleep(0.5)
                             

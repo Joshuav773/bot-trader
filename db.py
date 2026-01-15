@@ -299,6 +299,120 @@ class Database:
             if self.conn:
                 self.conn.rollback()
             return False
+    
+    def save_large_order(self, order: Dict) -> bool:
+        """Save large order to order_flow table"""
+        if not self.conn:
+            if not self.connect():
+                return False
+        
+        try:
+            cursor = self.conn.cursor()
+            
+            # Parse timestamp
+            timestamp = order.get('timestamp')
+            if isinstance(timestamp, str):
+                timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            elif not isinstance(timestamp, datetime):
+                timestamp = datetime.now(timezone.utc)
+            
+            # Prepare raw_data JSON string
+            import json
+            raw_data = json.dumps({
+                'order_type': order.get('order_type'),
+                'order_size_shares': order.get('order_size_shares'),
+                'bid_size': order.get('bid_size'),
+                'ask_size': order.get('ask_size'),
+                'spread': order.get('spread'),
+                'instrument': order.get('instrument'),
+            })
+            
+            # Save to order_flow table
+            cursor.execute("""
+                INSERT INTO order_flow 
+                (ticker, order_type, order_size_usd, price, timestamp, source, raw_data, display_ticker, instrument, order_side)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                order.get('symbol'),
+                f"large_order_{order.get('order_type', 'UNKNOWN').lower()}",  # order_type
+                order.get('order_value_usd'),
+                order.get('price'),
+                timestamp,
+                'streamer',  # source
+                raw_data,
+                order.get('symbol'),  # display_ticker
+                order.get('instrument', 'equity'),  # instrument (equity or option)
+                order.get('order_type'),  # order_side (BUY or SELL)
+            ))
+            
+            self.conn.commit()
+            cursor.close()
+            
+            logger.debug(f"💾 Saved large order to order_flow: {order.get('symbol')} {order.get('order_type')} ${order.get('order_value_usd'):,.2f}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error saving large order: {e}", exc_info=True)
+            if self.conn:
+                self.conn.rollback()
+            return False
+    
+    def save_all_order(self, order: Dict) -> bool:
+        """Save ANY order (regardless of size) to order_flow table"""
+        if not self.conn:
+            if not self.connect():
+                return False
+        
+        try:
+            cursor = self.conn.cursor()
+            
+            # Parse timestamp
+            timestamp = order.get('timestamp')
+            if isinstance(timestamp, str):
+                timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            elif not isinstance(timestamp, datetime):
+                timestamp = datetime.now(timezone.utc)
+            
+            # Prepare raw_data JSON string
+            import json
+            raw_data = json.dumps({
+                'order_type': order.get('order_type'),
+                'order_size_shares': order.get('order_size_shares'),
+                'detection_method': order.get('detection_method'),
+                'exchange': order.get('exchange'),
+                'book_time': order.get('book_time'),
+                'price_level': order.get('price_level'),
+                'instrument': order.get('instrument'),
+            })
+            
+            # Save to order_flow table
+            cursor.execute("""
+                INSERT INTO order_flow 
+                (ticker, order_type, order_size_usd, price, timestamp, source, raw_data, display_ticker, instrument, order_side)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                order.get('symbol'),
+                order.get('order_type', 'ORDER').lower(),  # order_type
+                order.get('order_value_usd', 0),
+                order.get('price'),
+                timestamp,
+                'order_book',  # source
+                raw_data,
+                order.get('symbol'),  # display_ticker
+                order.get('instrument', 'equity'),  # instrument
+                order.get('order_side', order.get('order_type', 'UNKNOWN')),  # order_side
+            ))
+            
+            self.conn.commit()
+            cursor.close()
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error saving order: {e}", exc_info=True)
+            if self.conn:
+                self.conn.rollback()
+            return False
 
 
 # Global database instance
