@@ -57,17 +57,10 @@ export async function cursorFetch(
   return res.json()
 }
 
-export function json(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  })
-}
-
-export function errorResponse(err: unknown) {
+export function handleError(res: { status: (code: number) => { json: (data: unknown) => void } }, err: unknown) {
   if (err instanceof AuthError) {
-    return json({ ok: false, message: err.message }, 401)
+    return res.status(401).json({ ok: false, message: err.message })
   }
   const message = err instanceof Error ? err.message : 'Internal error'
-  return json({ ok: false, message }, 500)
+  return res.status(500).json({ ok: false, message })
 }

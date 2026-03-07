@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { requireAuth, buildPrompt, cursorFetch, errorResponse } from './_lib/cursor'
+import { requireAuth, buildPrompt, cursorFetch, handleError } from './_lib/cursor'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false })
@@ -23,8 +23,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       status: 'RUNNING',
     })
   } catch (err) {
-    const e = errorResponse(err)
-    const body = await e.json()
-    return res.status(e.status).json(body)
+    return handleError(res, err)
   }
 }
