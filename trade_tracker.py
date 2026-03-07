@@ -1,23 +1,31 @@
 """
-Large Trade Tracker
-Tracks trades >= $200k and records entry/exit prices
+Enhanced Large Trade Tracker
+Tracks large executed trades >= $50k with improved detection
 """
 import logging
 from typing import Dict, Optional
-from datetime import datetime, timezone
-from collections import defaultdict
+from datetime import datetime, timezone, timedelta
+from collections import defaultdict, deque
 
 logger = logging.getLogger(__name__)
 
 
 class LargeTradeTracker:
-    """Track large trades ($200k+) with entry/exit prices"""
+    """Enhanced trade tracker with better volume spike detection"""
     
-    def __init__(self, min_trade_value: float = 200000.0):
-        self.min_trade_value = min_trade_value  # $200k minimum
+    def __init__(self, min_trade_value: float = 50000.0):
+        self.min_trade_value = min_trade_value  # $50k minimum
         self.previous_volumes = {}  # Track previous volume per symbol
+        self.previous_prices = {}  # Track previous prices
         self.active_trades = {}  # Track active large trades
         self.trades_tracked = 0
+        
+        # Deduplication
+        self.recent_trades = defaultdict(lambda: deque(maxlen=5))  # Last 5 trades per symbol
+        self.deduplication_window_seconds = 3
+        
+        # Volume spike detection (track recent volumes for better detection)
+        self.recent_volumes = defaultdict(lambda: deque(maxlen=5))  # Last 5 volumes
         
         # For tracking entry/exit points
         self.trade_state = defaultdict(lambda: {
@@ -59,14 +67,37 @@ class LargeTradeTracker:
             # Calculate volume delta
             volume_delta = volume - prev_volume
             
+            # Track recent volumes for spike detection
+            self.recent_volumes[symbol].append(volume)
+            
+            # Calculate average recent volume (for spike detection)
+            recent_volumes_list = list(self.recent_volumes[symbol])
+            if len(recent_volumes_list) > 1:
+                avg_recent_volume = sum(recent_volumes_list[:-1]) / (len(recent_volumes_list) - 1)
+            else:
+                avg_recent_volume = volume
+            
+            # Detect volume spike (volume significantly higher than average)
+            volume_spike = False
+            if avg_recent_volume > 0:
+                volume_increase_pct = (volume_delta / avg_recent_volume) * 100 if avg_recent_volume > 0 else 0
+                volume_spike = volume_increase_pct > 50  # 50% increase = spike
+            
             # Only process if volume increased (trade happened)
             if volume_delta <= 0:
                 # Update previous volume but don't track
                 self.previous_volumes[symbol] = volume
+                self.previous_prices[symbol] = float(last_price)
                 return None
             
-            # Update previous volume
+            # Get previous price for price change calculation
+            prev_price = self.previous_prices.get(symbol, float(last_price))
+            price_change = float(last_price) - prev_price
+            price_change_pct = (price_change / prev_price * 100) if prev_price > 0 else 0
+            
+            # Update previous values
             self.previous_volumes[symbol] = volume
+            self.previous_prices[symbol] = float(last_price)
             
             # Get trade state for this symbol
             state = self.trade_state[symbol]
@@ -86,15 +117,35 @@ class LargeTradeTracker:
             state['trade_value_accumulated'] += trade_value_increment
             state['last_update'] = dt
             
-            # Check if accumulated trade value meets threshold
-            if state['trade_value_accumulated'] >= self.min_trade_value:
+            # Enhanced detection: Check if accumulated trade value meets threshold
+            # Also check for immediate large volume spike (single large trade)
+            immediate_large_trade = False
+            if volume_delta * float(last_price) >= self.min_trade_value:
+                # Single large trade detected (not accumulated)
+                immediate_large_trade = True
+            
+            if state['trade_value_accumulated'] >= self.min_trade_value or immediate_large_trade:
                 # Large trade detected!
-                entry_price = state['price_start']
-                exit_price = last_price
-                total_volume = state['volume_accumulated']
-                total_value = state['trade_value_accumulated']
-                start_time = state['start_time']
-                end_time = dt
+                if immediate_large_trade and volume_delta * float(last_price) > state['trade_value_accumulated']:
+                    # Single large trade is bigger than accumulated - use it
+                    entry_price = prev_price
+                    exit_price = last_price
+                    total_volume = volume_delta
+                    total_value = volume_delta * float(last_price)
+                    start_time = dt  # Use current time for single trade
+                    end_time = dt
+                else:
+                    # Use accumulated trade data
+                    entry_price = state['price_start']
+                    exit_price = last_price
+                    total_volume = state['volume_accumulated']
+                    total_value = state['trade_value_accumulated']
+                    start_time = state['start_time']
+                    end_time = dt
+                
+                # Deduplication check
+                if self._is_duplicate_trade(symbol, total_value, exit_price, dt):
+                    return None
                 
                 # Create trade record
                 trade_record = {
@@ -106,7 +157,9 @@ class LargeTradeTracker:
                     'volume': total_volume,
                     'trade_value_usd': total_value,
                     'price_change': float(exit_price) - float(entry_price) if entry_price and exit_price else 0,
-                    'price_change_pct': ((float(exit_price) - float(entry_price)) / float(entry_price) * 100) if entry_price and exit_price and float(entry_price) > 0 else 0
+                    'price_change_pct': ((float(exit_price) - float(entry_price)) / float(entry_price) * 100) if entry_price and exit_price and float(entry_price) > 0 else 0,
+                    'volume_spike': volume_spike,
+                    'detection_method': 'IMMEDIATE_SPIKE' if immediate_large_trade else 'ACCUMULATED'
                 }
                 
                 # Reset trade state for next tracking period
@@ -119,13 +172,6 @@ class LargeTradeTracker:
                 
                 self.trades_tracked += 1
                 
-                logger.info(
-                    f"💰 Large trade detected: {symbol} | "
-                    f"Value: ${total_value:,.2f} | "
-                    f"Entry: ${entry_price} → Exit: ${exit_price} | "
-                    f"Vol: {total_volume:,}"
-                )
-                
                 return trade_record
             
             return None
@@ -133,6 +179,26 @@ class LargeTradeTracker:
         except Exception as e:
             logger.error(f"Error processing quote for trade tracking: {e}")
             return None
+    
+    def _is_duplicate_trade(self, symbol: str, value: float, price: float, timestamp: datetime) -> bool:
+        """Check if this trade was recently detected (deduplication)"""
+        recent = self.recent_trades[symbol]
+        
+        for prev_trade in recent:
+            time_diff = (timestamp - prev_trade['timestamp']).total_seconds()
+            if time_diff < self.deduplication_window_seconds:
+                # Similar value and price = likely duplicate
+                if (abs(prev_trade['value'] - value) < value * 0.15 and  # Within 15% value
+                    abs(prev_trade['price'] - price) < price * 0.01):  # Within 1% price
+                    return True
+        
+        # Not duplicate - add to recent trades
+        recent.append({
+            'value': value,
+            'price': price,
+            'timestamp': timestamp
+        })
+        return False
     
     def get_stats(self) -> Dict:
         """Get tracking statistics"""
