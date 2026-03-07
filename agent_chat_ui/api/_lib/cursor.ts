@@ -3,7 +3,6 @@ import type { VercelRequest } from '@vercel/node'
 const CURSOR_BASE = 'https://api.cursor.com'
 
 const AGENT_LABELS: Record<string, string> = {
-  scanner: 'Market Scanner',
   analyst: 'Options Analyst',
 }
 
@@ -23,7 +22,7 @@ export class AuthError extends Error {
 
 export function buildPrompt(agentId: string | undefined, userPrompt: string): string {
   const label = AGENT_LABELS[agentId ?? ''] ?? agentId ?? 'Agent'
-  return `Adopt the persona: ${label}. Follow the instructions in the agents/ folder for this persona.\n\n${userPrompt}`
+  return `Adopt the persona: options-trader-agent. Follow the instructions in the agents/ folder for this persona.\n\n${userPrompt}`
 }
 
 export async function cursorFetch(
