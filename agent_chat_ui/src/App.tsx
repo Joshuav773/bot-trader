@@ -33,7 +33,6 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
   const [cursorAgentId, setCursorAgentId] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const seenIdsRef = useRef<Set<string>>(new Set())
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -55,30 +54,36 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
         const data = await pollStatus(agentId)
         setAgentStatus(data.status)
 
-        if (data.messages) {
-          for (const msg of data.messages) {
-            if (msg.type === 'user_message') continue
-            if (seenIdsRef.current.has(msg.id)) continue
-            seenIdsRef.current.add(msg.id)
+        const terminal = data.status === 'FINISHED' || data.status === 'STOPPED' || data.status === 'ERRORED'
 
-            const isThinking = msg.type !== 'assistant_message'
-            setMessages((prev) => [
-              ...prev,
-              {
-                id: msg.id || uid(),
-                role: 'agent',
-                type: isThinking ? 'thinking' : 'assistant_message',
-                content: msg.text,
-                timestamp: new Date(),
-                agentId: agent.id,
-              },
-            ])
-          }
-        }
-
-        if (data.status === 'FINISHED' || data.status === 'STOPPED' || data.status === 'ERRORED') {
+        if (terminal) {
           if (pollingRef.current) clearInterval(pollingRef.current)
           pollingRef.current = null
+
+          if (data.messages) {
+            const agentMessages = data.messages.filter((m: { type: string }) => m.type !== 'user_message')
+            const finalMsg = agentMessages.filter((m: { type: string }) => m.type === 'assistant_message').pop()
+
+            if (finalMsg) {
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: finalMsg.id || uid(),
+                  role: 'agent',
+                  type: 'assistant_message',
+                  content: finalMsg.text,
+                  timestamp: new Date(),
+                  agentId: agent.id,
+                },
+              ])
+            } else if (data.status === 'ERRORED') {
+              setMessages((prev) => [
+                ...prev,
+                { id: uid(), role: 'agent', content: 'Agent encountered an error.', timestamp: new Date(), agentId: agent.id },
+              ])
+            }
+          }
+
           setLoading(false)
           setCursorAgentId(null)
         }
@@ -146,7 +151,6 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
     setCursorAgentId(null)
     setAgentStatus(null)
     setLoading(false)
-    seenIdsRef.current = new Set()
   }
 
   async function handleStop() {
