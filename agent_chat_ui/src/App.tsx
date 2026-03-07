@@ -15,6 +15,14 @@ function uid() {
 
 const POLL_INTERVAL = 2500
 
+function displayContent(role: 'user' | 'agent', text: string): string {
+  if (role !== 'user') return text
+  if (!text.includes('Read and adopt the full persona') || !text.includes('\n\n')) return text
+  const idx = text.indexOf('\n\n')
+  const after = text.slice(idx + 2).trim()
+  return after || text
+}
+
 export default function App() {
   const [authed, setAuthed] = useState(() => !!getStoredKey())
 
@@ -56,14 +64,17 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
         setAgentStatus(data.status)
 
         if (data.messages && data.messages.length >= messageCountRef.current) {
-          const next = data.messages.map((m: { id: string; type: string; text: string }) => ({
-            id: m.id || uid(),
-            role: m.type === 'user_message' ? ('user' as const) : ('agent' as const),
-            type: m.type === 'assistant_message' ? 'assistant_message' : m.type === 'user_message' ? undefined : 'thinking',
-            content: m.text ?? '',
-            timestamp: new Date(),
-            agentId: agent.id,
-          }))
+          const next = data.messages.map((m: { id: string; type: string; text: string }) => {
+            const role = m.type === 'user_message' ? ('user' as const) : ('agent' as const)
+            return {
+              id: m.id || uid(),
+              role,
+              type: m.type === 'assistant_message' ? 'assistant_message' : m.type === 'user_message' ? undefined : 'thinking',
+              content: displayContent(role, m.text ?? ''),
+              timestamp: new Date(),
+              agentId: agent.id,
+            }
+          })
           messageCountRef.current = next.length
           setMessages(next)
         }
