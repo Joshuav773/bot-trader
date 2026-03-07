@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import type { Message, Agent } from './types'
 import { defaultAgent } from './agents'
-import { launchAgent, followUp, streamConversation, clearAgent, stopAgent, getStoredKey, clearKey } from './api'
+import { launchAgent, followUp, pollStatus, stopAgent, getStoredKey, clearKey } from './api'
 import AgentPicker from './components/AgentPicker'
 import MessageBubble from './components/MessageBubble'
 import TypingIndicator from './components/TypingIndicator'
@@ -12,6 +12,8 @@ let nextId = 0
 function uid() {
   return String(++nextId)
 }
+
+const POLL_INTERVAL = 2500
 
 export default function App() {
   const [authed, setAuthed] = useState(() => !!getStoredKey())
@@ -28,9 +30,10 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
   const [loading, setLoading] = useState(false)
   const [agentStatus, setAgentStatus] = useState<string | null>(null)
   const [agent, setAgent] = useState<Agent>(defaultAgent)
-  const [hasActiveAgent, setHasActiveAgent] = useState(false)
+  const [cursorAgentId, setCursorAgentId] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const closeStreamRef = useRef<(() => void) | null>(null)
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const seenIdsRef = useRef<Set<string>>(new Set())
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -39,53 +42,56 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
   useEffect(scrollToBottom, [messages, loading, scrollToBottom])
 
   useEffect(() => {
-    return () => closeStreamRef.current?.()
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current)
+    }
   }, [])
 
-  function connectStream(persona: string) {
-    closeStreamRef.current?.()
+  function startPolling(agentId: string) {
+    if (pollingRef.current) clearInterval(pollingRef.current)
 
-    const seenInUI = new Set(messages.filter((m) => m.role === 'agent').map((m) => m.id))
-
-    closeStreamRef.current = streamConversation(persona, {
-      onStatus(data) {
+    pollingRef.current = setInterval(async () => {
+      try {
+        const data = await pollStatus(agentId)
         setAgentStatus(data.status)
-      },
 
-      onMessage(data) {
-        if (data.type === 'user_message') return
-        if (seenInUI.has(data.id)) return
-        seenInUI.add(data.id)
+        if (data.messages) {
+          for (const msg of data.messages) {
+            if (msg.type === 'user_message') continue
+            if (seenIdsRef.current.has(msg.id)) continue
+            seenIdsRef.current.add(msg.id)
 
-        const isThinking = data.type !== 'assistant_message'
-
-        const msg: Message = {
-          id: data.id || uid(),
-          role: 'agent',
-          type: isThinking ? 'thinking' : 'assistant_message',
-          content: data.text,
-          timestamp: new Date(),
-          agentId: persona,
+            const isThinking = msg.type !== 'assistant_message'
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: msg.id || uid(),
+                role: 'agent',
+                type: isThinking ? 'thinking' : 'assistant_message',
+                content: msg.text,
+                timestamp: new Date(),
+                agentId: agent.id,
+              },
+            ])
+          }
         }
-        setMessages((prev) => [...prev, msg])
-      },
 
-      onDone(data) {
-        setAgentStatus(data.status)
-        setLoading(false)
-        setHasActiveAgent(false)
-        closeStreamRef.current = null
-      },
-
-      onError(data) {
+        if (data.status === 'FINISHED' || data.status === 'STOPPED' || data.status === 'ERRORED') {
+          if (pollingRef.current) clearInterval(pollingRef.current)
+          pollingRef.current = null
+          setLoading(false)
+          setCursorAgentId(null)
+        }
+      } catch {
+        if (pollingRef.current) clearInterval(pollingRef.current)
+        pollingRef.current = null
         setMessages((prev) => [
           ...prev,
-          { id: uid(), role: 'agent', content: `Error: ${data.message}`, timestamp: new Date(), agentId: persona },
+          { id: uid(), role: 'agent', content: 'Lost connection to agent.', timestamp: new Date(), agentId: agent.id },
         ])
         setLoading(false)
-        closeStreamRef.current = null
-      },
-    })
+      }
+    }, POLL_INTERVAL)
   }
 
   async function handleSend(text: string) {
@@ -100,23 +106,24 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
     setLoading(true)
 
     try {
-      const data = hasActiveAgent
-        ? await followUp(text, agent.id)
+      const data = cursorAgentId
+        ? await followUp(text, agent.id, cursorAgentId)
         : await launchAgent(text, agent.id)
 
       if (!data.ok) {
         setMessages((prev) => [
           ...prev,
-          { id: uid(), role: 'agent', content: data.message, timestamp: new Date(), agentId: agent.id },
+          { id: uid(), role: 'agent', content: data.message || 'Launch failed', timestamp: new Date(), agentId: agent.id },
         ])
         setLoading(false)
         return
       }
 
-      setHasActiveAgent(true)
+      const newId = data.cursor_agent_id!
+      setCursorAgentId(newId)
       setAgentStatus(data.status)
 
-      connectStream(agent.id)
+      startPolling(newId)
     } catch (err) {
       setMessages((prev) => [
         ...prev,
@@ -132,23 +139,25 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
     }
   }
 
-  async function handleClear() {
-    closeStreamRef.current?.()
-    closeStreamRef.current = null
-    await clearAgent(agent.id)
+  function handleClear() {
+    if (pollingRef.current) clearInterval(pollingRef.current)
+    pollingRef.current = null
     setMessages([])
-    setHasActiveAgent(false)
+    setCursorAgentId(null)
     setAgentStatus(null)
     setLoading(false)
+    seenIdsRef.current = new Set()
   }
 
   async function handleStop() {
-    await stopAgent(agent.id)
-    closeStreamRef.current?.()
-    closeStreamRef.current = null
+    if (cursorAgentId) {
+      await stopAgent(cursorAgentId)
+    }
+    if (pollingRef.current) clearInterval(pollingRef.current)
+    pollingRef.current = null
     setLoading(false)
     setAgentStatus('STOPPED')
-    setHasActiveAgent(false)
+    setCursorAgentId(null)
   }
 
   const hasMessages = messages.length > 0
@@ -258,7 +267,7 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
           <p className="text-[11px] text-text-muted mt-2 text-center">
             {isEnded
               ? 'Start a new conversation to continue.'
-              : <>Cursor Cloud Agent &middot; claude-4.5-sonnet &middot; {hasActiveAgent ? 'follow-up mode' : 'new agent'}</>
+              : <>Cursor Cloud Agent &middot; claude-4.5-sonnet &middot; {cursorAgentId ? 'follow-up mode' : 'new agent'}</>
             }
           </p>
         </div>
