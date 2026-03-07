@@ -6,6 +6,9 @@ python-dotenv==1.0.0
 # Schwab API
 schwab-py==1.5.1
 
+# Anthropic API (Claude)
+anthropic>=0.84.0
+
 # HTTP Requests
 requests==2.31.0
 

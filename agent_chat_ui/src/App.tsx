@@ -1,0 +1,268 @@
+import { useState, useRef, useEffect, useCallback } from 'react'
+import type { Message, Agent } from './types'
+import { defaultAgent } from './agents'
+import { launchAgent, followUp, streamConversation, clearAgent, stopAgent, getStoredKey, clearKey } from './api'
+import AgentPicker from './components/AgentPicker'
+import MessageBubble from './components/MessageBubble'
+import TypingIndicator from './components/TypingIndicator'
+import ChatInput from './components/ChatInput'
+import LoginScreen from './components/LoginScreen'
+
+let nextId = 0
+function uid() {
+  return String(++nextId)
+}
+
+export default function App() {
+  const [authed, setAuthed] = useState(() => !!getStoredKey())
+
+  if (!authed) {
+    return <LoginScreen onLogin={() => setAuthed(true)} />
+  }
+
+  return <ChatApp onLogout={() => { clearKey(); setAuthed(false) }} />
+}
+
+function ChatApp({ onLogout }: { onLogout: () => void }) {
+  const [messages, setMessages] = useState<Message[]>([])
+  const [loading, setLoading] = useState(false)
+  const [agentStatus, setAgentStatus] = useState<string | null>(null)
+  const [agent, setAgent] = useState<Agent>(defaultAgent)
+  const [hasActiveAgent, setHasActiveAgent] = useState(false)
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const closeStreamRef = useRef<(() => void) | null>(null)
+
+  const scrollToBottom = useCallback(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [])
+
+  useEffect(scrollToBottom, [messages, loading, scrollToBottom])
+
+  useEffect(() => {
+    return () => closeStreamRef.current?.()
+  }, [])
+
+  function connectStream(persona: string) {
+    closeStreamRef.current?.()
+
+    const seenInUI = new Set(messages.filter((m) => m.role === 'agent').map((m) => m.id))
+
+    closeStreamRef.current = streamConversation(persona, {
+      onStatus(data) {
+        setAgentStatus(data.status)
+      },
+
+      onMessage(data) {
+        if (data.type === 'user_message') return
+        if (seenInUI.has(data.id)) return
+        seenInUI.add(data.id)
+
+        const isThinking = data.type !== 'assistant_message'
+
+        const msg: Message = {
+          id: data.id || uid(),
+          role: 'agent',
+          type: isThinking ? 'thinking' : 'assistant_message',
+          content: data.text,
+          timestamp: new Date(),
+          agentId: persona,
+        }
+        setMessages((prev) => [...prev, msg])
+      },
+
+      onDone(data) {
+        setAgentStatus(data.status)
+        setLoading(false)
+        setHasActiveAgent(false)
+        closeStreamRef.current = null
+      },
+
+      onError(data) {
+        setMessages((prev) => [
+          ...prev,
+          { id: uid(), role: 'agent', content: `Error: ${data.message}`, timestamp: new Date(), agentId: persona },
+        ])
+        setLoading(false)
+        closeStreamRef.current = null
+      },
+    })
+  }
+
+  async function handleSend(text: string) {
+    const userMsg: Message = {
+      id: uid(),
+      role: 'user',
+      content: text,
+      timestamp: new Date(),
+      agentId: agent.id,
+    }
+    setMessages((prev) => [...prev, userMsg])
+    setLoading(true)
+
+    try {
+      const data = hasActiveAgent
+        ? await followUp(text, agent.id)
+        : await launchAgent(text, agent.id)
+
+      if (!data.ok) {
+        setMessages((prev) => [
+          ...prev,
+          { id: uid(), role: 'agent', content: data.message, timestamp: new Date(), agentId: agent.id },
+        ])
+        setLoading(false)
+        return
+      }
+
+      setHasActiveAgent(true)
+      setAgentStatus(data.status)
+
+      connectStream(agent.id)
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: uid(),
+          role: 'agent',
+          content: `Error: ${err instanceof Error ? err.message : 'Something went wrong'}`,
+          timestamp: new Date(),
+          agentId: agent.id,
+        },
+      ])
+      setLoading(false)
+    }
+  }
+
+  async function handleClear() {
+    closeStreamRef.current?.()
+    closeStreamRef.current = null
+    await clearAgent(agent.id)
+    setMessages([])
+    setHasActiveAgent(false)
+    setAgentStatus(null)
+    setLoading(false)
+  }
+
+  async function handleStop() {
+    await stopAgent(agent.id)
+    closeStreamRef.current?.()
+    closeStreamRef.current = null
+    setLoading(false)
+    setAgentStatus('STOPPED')
+    setHasActiveAgent(false)
+  }
+
+  const hasMessages = messages.length > 0
+  const isRunning = agentStatus === 'RUNNING' || agentStatus === 'CREATING'
+  const isEnded = agentStatus === 'STOPPED' || agentStatus === 'FINISHED' || agentStatus === 'ERRORED' || agentStatus === 'TIMEOUT'
+  const inputDisabled = loading || isEnded
+
+  const statusLabel: Record<string, string> = {
+    STOPPED: 'Agent was stopped.',
+    FINISHED: 'Agent finished.',
+    ERRORED: 'Agent encountered an error.',
+    TIMEOUT: 'Agent timed out.',
+  }
+
+  return (
+    <div className="h-screen flex flex-col">
+      <header className="flex-shrink-0 border-b border-border bg-surface/80 backdrop-blur-md px-5 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className={`w-2 h-2 rounded-full ${
+            isRunning ? 'bg-amber-400 animate-pulse' :
+            isEnded ? 'bg-red-400' :
+            'bg-green-500'
+          }`} />
+          <h1 className="text-[15px] font-semibold tracking-tight">Agent Command</h1>
+          {agentStatus && (
+            <span className="text-[11px] font-mono text-text-muted uppercase">{agentStatus}</span>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          <AgentPicker selected={agent} onSelect={setAgent} />
+          {isRunning && (
+            <button
+              onClick={handleStop}
+              className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-white/5 transition-colors cursor-pointer"
+            >
+              Stop
+            </button>
+          )}
+          {hasMessages && !isRunning && (
+            <button
+              onClick={handleClear}
+              className="text-xs text-text-muted hover:text-text-secondary px-2 py-1 rounded hover:bg-white/5 transition-colors cursor-pointer"
+            >
+              New
+            </button>
+          )}
+          <button
+            onClick={onLogout}
+            className="text-xs text-text-muted hover:text-text-secondary px-2 py-1 rounded hover:bg-white/5 transition-colors cursor-pointer"
+            title="Log out"
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M11 11l3-3-3-3M14 8H6" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <main className="flex-1 overflow-y-auto">
+        {!hasMessages ? (
+          <div className="h-full flex items-center justify-center">
+            <div className="text-center max-w-md px-6">
+              <div className="text-4xl mb-4">{agent.avatar}</div>
+              <h2 className="text-lg font-medium text-text mb-1">{agent.label}</h2>
+              <p className="text-sm text-text-secondary leading-relaxed">
+                {agent.description}. Send a prompt to launch a cloud agent.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="max-w-2xl mx-auto px-5 py-6 flex flex-col gap-4">
+            {messages.map((msg) => (
+              <MessageBubble key={msg.id} message={msg} />
+            ))}
+            {loading && <TypingIndicator />}
+
+            {isEnded && (
+              <div className="flex flex-col items-center gap-3 py-4 mt-2">
+                <div className="flex items-center gap-2 text-sm text-text-secondary">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className={agentStatus === 'ERRORED' ? 'text-red-400' : 'text-text-muted'}>
+                    <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" />
+                    <path d="M8 5V9M8 11V11.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                  <span>{statusLabel[agentStatus!] ?? 'Conversation ended.'}</span>
+                </div>
+                <button
+                  onClick={handleClear}
+                  className="
+                    px-4 py-2 rounded-lg text-sm font-medium
+                    bg-white/10 text-white hover:bg-white/15
+                    transition-colors cursor-pointer
+                  "
+                >
+                  New Conversation
+                </button>
+              </div>
+            )}
+
+            <div ref={bottomRef} />
+          </div>
+        )}
+      </main>
+
+      <footer className="flex-shrink-0 border-t border-border bg-bg">
+        <div className="max-w-2xl mx-auto px-5 py-4">
+          <ChatInput onSend={handleSend} disabled={inputDisabled} />
+          <p className="text-[11px] text-text-muted mt-2 text-center">
+            {isEnded
+              ? 'Start a new conversation to continue.'
+              : <>Cursor Cloud Agent &middot; claude-4.5-sonnet &middot; {hasActiveAgent ? 'follow-up mode' : 'new agent'}</>
+            }
+          </p>
+        </div>
+      </footer>
+    </div>
+  )
+}
