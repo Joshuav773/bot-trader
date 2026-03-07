@@ -1,14 +1,4 @@
 import type { VercelRequest } from '@vercel/node'
-import { resolve } from 'path'
-import { existsSync } from 'fs'
-
-if (!process.env.AGENT_CHAT_API_KEY) {
-  try {
-    const dotenv = await import('dotenv')
-    const envPath = resolve(process.cwd(), '../.env')
-    dotenv.config({ path: existsSync(envPath) ? envPath : resolve(process.cwd(), '.env') })
-  } catch { /* production — env vars set via dashboard */ }
-}
 
 const CURSOR_BASE = 'https://api.cursor.com'
 
