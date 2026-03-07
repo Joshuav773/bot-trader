@@ -1,10 +1,15 @@
 import type { VercelRequest } from '@vercel/node'
+import { config } from 'dotenv'
+import { resolve } from 'path'
+import { existsSync } from 'fs'
+
+const envPath = resolve(process.cwd(), '../.env')
+config({ path: existsSync(envPath) ? envPath : resolve(process.cwd(), '.env') })
 
 const CURSOR_BASE = 'https://api.cursor.com'
 
 const AGENT_LABELS: Record<string, string> = {
-  scanner: 'Market Scanner',
-  analyst: 'Options Analyst',
+  'options-trader': 'Options Analyst (The Quant Oracle)',
 }
 
 export function requireAuth(req: VercelRequest): void {
@@ -22,8 +27,8 @@ export class AuthError extends Error {
 }
 
 export function buildPrompt(agentId: string | undefined, userPrompt: string): string {
-  const label = AGENT_LABELS[agentId ?? ''] ?? agentId ?? 'Agent'
-  return `Adopt the persona: ${label}. Follow the instructions in the agents/ folder for this persona.\n\n${userPrompt}`
+  const label = AGENT_LABELS[agentId ?? ''] ?? 'Options Analyst'
+  return `You are ${label}. Read and adopt the full persona defined in agents/options-trader-agent.json — follow its system_prompt, analytical_framework, battle_plans, operational_rules, and response_template exactly.\n\n${userPrompt}`
 }
 
 export async function cursorFetch(

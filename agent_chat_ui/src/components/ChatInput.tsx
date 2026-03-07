@@ -36,7 +36,7 @@ export default function ChatInput({ onSend, disabled }: Props) {
   }
 
   return (
-    <div className="relative">
+    <div className="flex items-end gap-2">
       <textarea
         ref={ref}
         value={value}
@@ -49,11 +49,12 @@ export default function ChatInput({ onSend, disabled }: Props) {
         rows={1}
         placeholder="Send a message..."
         className="
-          w-full resize-none bg-surface border border-border rounded-xl
-          px-4 py-3 pr-14 text-[14.5px] text-text placeholder:text-text-muted
+          flex-1 resize-none bg-surface border border-border rounded-xl
+          px-4 py-3 text-[14.5px] text-text placeholder:text-text-muted
           focus:outline-none focus:border-border-focus
           transition-colors duration-150
           disabled:opacity-50 font-[inherit]
+          leading-[1.5]
         "
       />
       <button
@@ -61,8 +62,8 @@ export default function ChatInput({ onSend, disabled }: Props) {
         disabled={disabled || !value.trim()}
         aria-label="Send"
         className="
-          absolute right-2.5 bottom-2.5
-          w-8 h-8 flex items-center justify-center rounded-lg
+          flex-shrink-0 w-[42px] h-[42px]
+          flex items-center justify-center rounded-xl
           bg-white text-black
           disabled:opacity-20 disabled:cursor-default
           hover:bg-white/90 transition-all duration-150

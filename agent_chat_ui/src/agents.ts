@@ -2,17 +2,11 @@ import type { Agent } from './types'
 
 export const agents: Agent[] = [
   {
-    id: 'scanner',
-    label: 'Market Scanner',
-    description: 'Scans for unusual volume and large orders',
-    avatar: '◎',
-  },
-  {
-    id: 'analyst',
+    id: 'options-trader',
     label: 'Options Analyst',
-    description: 'Analyzes options flow and sentiment',
+    description: 'Quantitative options analysis powered by The Quant Oracle',
     avatar: '◈',
   },
 ]
 
-export const defaultAgent = agents[1]
+export const defaultAgent = agents[0]
