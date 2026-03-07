@@ -15,6 +15,14 @@ function uid() {
 
 const POLL_INTERVAL = 2500
 
+function displayContent(role: 'user' | 'agent', text: string): string {
+  if (role !== 'user') return text
+  if (!text.includes('Read and adopt the full persona') || !text.includes('\n\n')) return text
+  const idx = text.indexOf('\n\n')
+  const after = text.slice(idx + 2).trim()
+  return after || text
+}
+
 export default function App() {
   const [authed, setAuthed] = useState(() => !!getStoredKey())
 
@@ -33,6 +41,7 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
   const [cursorAgentId, setCursorAgentId] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const messageCountRef = useRef(0)
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -54,38 +63,33 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
         const data = await pollStatus(agentId)
         setAgentStatus(data.status)
 
-        const terminal = data.status === 'FINISHED' || data.status === 'STOPPED' || data.status === 'ERRORED'
+        if (data.messages && data.messages.length >= messageCountRef.current) {
+          const next = data.messages.map((m: { id: string; type: string; text: string }) => {
+            const role = m.type === 'user_message' ? ('user' as const) : ('agent' as const)
+            return {
+              id: m.id || uid(),
+              role,
+              type: m.type === 'assistant_message' ? 'assistant_message' : m.type === 'user_message' ? undefined : 'thinking',
+              content: displayContent(role, m.text ?? ''),
+              timestamp: new Date(),
+              agentId: agent.id,
+            }
+          })
+          messageCountRef.current = next.length
+          setMessages(next)
+        }
 
+        const terminal = data.status === 'FINISHED' || data.status === 'STOPPED' || data.status === 'ERRORED'
         if (terminal) {
           if (pollingRef.current) clearInterval(pollingRef.current)
           pollingRef.current = null
-
-          if (data.messages) {
-            const agentMessages = data.messages.filter((m: { type: string }) => m.type !== 'user_message')
-            const finalMsg = agentMessages.filter((m: { type: string }) => m.type === 'assistant_message').pop()
-
-            if (finalMsg) {
-              setMessages((prev) => [
-                ...prev,
-                {
-                  id: finalMsg.id || uid(),
-                  role: 'agent',
-                  type: 'assistant_message',
-                  content: finalMsg.text,
-                  timestamp: new Date(),
-                  agentId: agent.id,
-                },
-              ])
-            } else if (data.status === 'ERRORED') {
-              setMessages((prev) => [
-                ...prev,
-                { id: uid(), role: 'agent', content: 'Agent encountered an error.', timestamp: new Date(), agentId: agent.id },
-              ])
-            }
+          if (data.status === 'ERRORED') {
+            setMessages((prev) => [
+              ...prev,
+              { id: uid(), role: 'agent', content: 'Agent encountered an error.', timestamp: new Date(), agentId: agent.id },
+            ])
           }
-
           setLoading(false)
-          setCursorAgentId(null)
         }
       } catch {
         if (pollingRef.current) clearInterval(pollingRef.current)
@@ -108,6 +112,7 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
       agentId: agent.id,
     }
     setMessages((prev) => [...prev, userMsg])
+    messageCountRef.current += 1
     setLoading(true)
 
     try {
@@ -147,6 +152,7 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
   function handleClear() {
     if (pollingRef.current) clearInterval(pollingRef.current)
     pollingRef.current = null
+    messageCountRef.current = 0
     setMessages([])
     setCursorAgentId(null)
     setAgentStatus(null)
@@ -166,12 +172,11 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
 
   const hasMessages = messages.length > 0
   const isRunning = agentStatus === 'RUNNING' || agentStatus === 'CREATING'
-  const isEnded = agentStatus === 'STOPPED' || agentStatus === 'FINISHED' || agentStatus === 'ERRORED' || agentStatus === 'TIMEOUT'
-  const inputDisabled = loading || isEnded
+  const isEnded = agentStatus === 'STOPPED' || agentStatus === 'ERRORED' || agentStatus === 'TIMEOUT'
+  const inputDisabled = loading
 
   const statusLabel: Record<string, string> = {
     STOPPED: 'Agent was stopped.',
-    FINISHED: 'Agent finished.',
     ERRORED: 'Agent encountered an error.',
     TIMEOUT: 'Agent timed out.',
   }
@@ -271,7 +276,7 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
           <p className="text-[11px] text-text-muted mt-2 text-center">
             {isEnded
               ? 'Start a new conversation to continue.'
-              : <>Cursor Cloud Agent &middot; claude-4.5-sonnet &middot; {cursorAgentId ? 'follow-up mode' : 'new agent'}</>
+              : <>Cursor Cloud Agent &middot; claude-4.5-sonnet &middot; {cursorAgentId ? 'follow-up ready' : 'new agent'}</>
             }
           </p>
         </div>
