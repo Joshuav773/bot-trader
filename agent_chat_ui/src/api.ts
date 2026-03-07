@@ -46,78 +46,55 @@ export async function authenticate(apiKey: string): Promise<boolean> {
   return false
 }
 
-export interface AgentResponse {
+export interface LaunchResponse {
   ok: boolean
-  agent_cursor_id: string | null
+  cursor_agent_id: string | null
   status: string | null
-  message: string
   url: string | null
+  message?: string
 }
 
-export async function launchAgent(prompt: string, agentId: string): Promise<AgentResponse> {
+export async function launchAgent(prompt: string, agentId: string): Promise<LaunchResponse> {
   const res = await authedFetch(`${BASE}/launch`, {
     method: 'POST',
     body: JSON.stringify({ prompt, agent_id: agentId }),
   })
-  if (!res.ok) throw new Error(`Server error: ${res.status}`)
+  if (!res.ok && res.status !== 401) throw new Error(`Server error: ${res.status}`)
   return res.json()
 }
 
-export async function followUp(prompt: string, agentId: string): Promise<AgentResponse> {
+export async function followUp(prompt: string, agentId: string, cursorAgentId: string): Promise<LaunchResponse> {
   const res = await authedFetch(`${BASE}/followup`, {
     method: 'POST',
-    body: JSON.stringify({ prompt, agent_id: agentId }),
+    body: JSON.stringify({ prompt, agent_id: agentId, cursor_agent_id: cursorAgentId }),
   })
-  if (!res.ok) throw new Error(`Server error: ${res.status}`)
+  if (!res.ok && res.status !== 401) throw new Error(`Server error: ${res.status}`)
   return res.json()
 }
 
-export interface SSECallbacks {
-  onStatus: (data: { status: string; summary?: string; url?: string; pr_url?: string }) => void
-  onMessage: (data: { id: string; type: string; text: string }) => void
-  onDone: (data: { status: string; summary?: string }) => void
-  onError: (data: { message: string }) => void
+export interface StatusResponse {
+  ok: boolean
+  cursor_agent_id: string
+  status: string
+  summary: string | null
+  url: string | null
+  pr_url: string | null
+  messages: { id: string; type: string; text: string }[]
+  message?: string
 }
 
-export function streamConversation(persona: string, callbacks: SSECallbacks): () => void {
-  const key = getStoredKey() || ''
-  const es = new EventSource(`${BASE}/stream/${persona}?key=${encodeURIComponent(key)}`)
-
-  es.addEventListener('status', (e) => {
-    callbacks.onStatus(JSON.parse(e.data))
-  })
-
-  es.addEventListener('message', (e) => {
-    callbacks.onMessage(JSON.parse(e.data))
-  })
-
-  es.addEventListener('done', (e) => {
-    callbacks.onDone(JSON.parse(e.data))
-    es.close()
-  })
-
-  es.addEventListener('error', (e) => {
-    if (e instanceof MessageEvent) {
-      callbacks.onError(JSON.parse(e.data))
-    } else {
-      callbacks.onError({ message: 'Connection lost' })
-    }
-    es.close()
-  })
-
-  return () => es.close()
-}
-
-export async function clearAgent(agentId: string) {
-  await authedFetch(`${BASE}/clear`, {
+export async function pollStatus(cursorAgentId: string): Promise<StatusResponse> {
+  const res = await authedFetch(`${BASE}/status`, {
     method: 'POST',
-    body: JSON.stringify({ agent_id: agentId }),
+    body: JSON.stringify({ cursor_agent_id: cursorAgentId }),
   })
+  if (!res.ok && res.status !== 401) throw new Error(`Server error: ${res.status}`)
+  return res.json()
 }
 
-export async function stopAgent(agentId: string) {
+export async function stopAgent(cursorAgentId: string) {
   await authedFetch(`${BASE}/stop`, {
     method: 'POST',
-    body: JSON.stringify({ agent_id: agentId }),
+    body: JSON.stringify({ cursor_agent_id: cursorAgentId }),
   })
 }
