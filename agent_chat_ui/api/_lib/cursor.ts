@@ -7,8 +7,9 @@ config({ path: resolve(process.cwd(), '../.env') })
 
 const CURSOR_BASE = 'https://api.cursor.com'
 
-const AGENT_LABELS: Record<string, string> = {
-  'options-trader': 'Options Analyst (The Quant Oracle)',
+const AGENT_CONFIG: Record<string, { label: string; personaFile: string }> = {
+  'options-trader': { label: 'Options Analyst (The Quant Oracle)', personaFile: 'options-trader-agent.json' },
+  'forex-trader': { label: 'Forex Trader (The Global Macro Sentinel)', personaFile: 'forex-trader-agent.json' },
 }
 
 export function requireAuth(req: VercelRequest): void {
@@ -26,8 +27,8 @@ export class AuthError extends Error {
 }
 
 export function buildPrompt(agentId: string | undefined, userPrompt: string): string {
-  const label = AGENT_LABELS[agentId ?? ''] ?? 'Options Analyst'
-  return `You are ${label}. Read and adopt the full persona defined in agents/options-trader-agent.json — follow its system_prompt, analytical_framework, battle_plans, operational_rules, and response_template exactly.\n\n${userPrompt}`
+  const config = AGENT_CONFIG[agentId ?? ''] ?? AGENT_CONFIG['options-trader']
+  return `You are ${config.label}. Read and adopt the full persona defined in agents/${config.personaFile} — follow its system_prompt and all other fields (analytical_framework, decision_logic, operational_scenarios, etc.) exactly.\n\n${userPrompt}`
 }
 
 export async function cursorFetch(

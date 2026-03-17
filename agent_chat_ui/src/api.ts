@@ -98,3 +98,18 @@ export async function stopAgent(cursorAgentId: string) {
     body: JSON.stringify({ cursor_agent_id: cursorAgentId }),
   })
 }
+
+export interface AgentListItem {
+  id: string
+  name: string | null
+  status: string
+  summary: string | null
+  createdAt: string
+}
+
+export async function listAgents(): Promise<AgentListItem[]> {
+  const res = await authedFetch(`${BASE}/agents`)
+  if (!res.ok && res.status !== 401) throw new Error(`Server error: ${res.status}`)
+  const data = await res.json()
+  return data.agents ?? []
+}

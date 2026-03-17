@@ -17,7 +17,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const data = await cursorFetch('POST', '/v0/agents', {
       prompt: { text: fullPrompt },
-      model: process.env.CURSOR_MODEL || 'claude-4.5-sonnet-thinking',
       source: {
         repository: repoUrl,
         ref: process.env.GITHUB_REPO_REF || 'main',
