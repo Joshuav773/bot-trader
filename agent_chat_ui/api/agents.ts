@@ -3,7 +3,7 @@ import { requireAuth, cursorFetch, handleError } from './_lib/cursor.js'
 
 // Hard cutoff: only show agents created on or after this date.
 // This is set to last Monday in UTC. Adjust if you want to widen/narrow history.
-const AGENT_HISTORY_CUTOFF = new Date('2026-02-09T00:00:00Z')
+const AGENT_HISTORY_CUTOFF = new Date('2026-03-09T00:00:00Z')
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') return res.status(405).json({ ok: false })
