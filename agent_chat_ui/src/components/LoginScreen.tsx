@@ -27,7 +27,7 @@ export default function LoginScreen({ onLogin }: Props) {
   }
 
   return (
-    <div className="h-screen flex items-center justify-center bg-bg">
+    <div className="h-[100dvh] flex items-center justify-center bg-bg">
       <form onSubmit={handleSubmit} className="w-full max-w-sm px-6">
         <div className="text-center mb-8">
           <div className="text-3xl mb-3">◈</div>

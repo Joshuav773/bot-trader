@@ -205,7 +205,7 @@ export default function AgentSidebar({
   return (
     <>
       {/* Desktop: always visible */}
-      <div className="hidden md:flex h-screen flex-shrink-0">
+      <div className="hidden md:flex h-[100dvh] flex-shrink-0">
         {sidebar}
       </div>
 

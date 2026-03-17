@@ -228,7 +228,7 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
   }
 
   return (
-    <div className="h-screen flex flex-row">
+    <div className="h-[100dvh] flex flex-row">
       <AgentSidebar
         open={mobileSidebar}
         onClose={() => setMobileSidebar(false)}
@@ -315,7 +315,7 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
 
         {/* Input bar */}
         <footer className="flex-shrink-0 border-t border-border">
-          <div className="max-w-3xl mx-auto px-4 md:px-6 py-3">
+          <div className="max-w-3xl mx-auto px-4 md:px-6 py-3 pb-[env(safe-area-inset-bottom)]">
             <ChatInput onSend={handleSend} disabled={inputDisabled} />
           </div>
         </footer>
