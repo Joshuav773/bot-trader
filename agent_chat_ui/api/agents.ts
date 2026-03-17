@@ -1,15 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth, cursorFetch, handleError } from './_lib/cursor.js'
 
-function getPreviousMonday(): Date {
-  const now = new Date()
-  const day = now.getUTCDay()
-  const daysSinceMonday = day === 0 ? 6 : day - 1
-  const monday = new Date(now)
-  monday.setUTCDate(now.getUTCDate() - daysSinceMonday - 7)
-  monday.setUTCHours(0, 0, 0, 0)
-  return monday
-}
+// Hard cutoff: only show agents created on or after this date.
+// This is set to last Monday in UTC. Adjust if you want to widen/narrow history.
+const AGENT_HISTORY_CUTOFF = new Date('2026-02-09T00:00:00Z')
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') return res.status(405).json({ ok: false })
@@ -20,10 +14,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const data = await cursorFetch('GET', '/v0/agents?limit=100') as Record<string, any>
     const allAgents = (data.agents ?? []) as Record<string, any>[]
 
-    const cutoff = getPreviousMonday()
     const recent = allAgents.filter((a) => {
       if (!a.createdAt) return false
-      return new Date(a.createdAt) >= cutoff
+      return new Date(a.createdAt) >= AGENT_HISTORY_CUTOFF
     })
 
     return res.json({
