@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { requireAuth, cursorFetch, handleError } from './_lib/cursor.js'
+import { requireAuth, cursorFetch, handleError, agentMatchesConfiguredRepository, inferPersonaFromName } from './_lib/cursor.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') return res.status(405).json({ ok: false })
@@ -12,7 +12,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const visible = allAgents.filter((a) => {
       const status = (a.status ?? '').toString().toUpperCase()
-      return status !== 'EXPIRED'
+      if (status === 'EXPIRED') return false
+      return agentMatchesConfiguredRepository(a as Record<string, unknown>)
     })
 
     return res.json({
@@ -23,6 +24,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         status: a.status ?? 'UNKNOWN',
         summary: a.summary ?? null,
         createdAt: a.createdAt,
+        persona: inferPersonaFromName(a.name as string | null) ?? null,
       })),
     })
   } catch (err) {

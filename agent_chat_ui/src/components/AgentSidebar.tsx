@@ -153,6 +153,7 @@ export default function AgentSidebar({
               const isActive = a.id === activeId
               const label = a.name || a.summary?.slice(0, 40) || 'Untitled agent'
               const dotClass = STATUS_DOT[a.status] ?? 'bg-neutral-600'
+              const persona = agentPresets.find((p) => p.id === a.persona)
 
               return (
                 <button
@@ -167,7 +168,16 @@ export default function AgentSidebar({
                     }
                   `}
                 >
-                  <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotClass}`} />
+                  <span className="relative flex-shrink-0 w-5 h-5 flex items-center justify-center" title={persona?.label}>
+                    {persona ? (
+                      <span className="text-[12px] leading-none">{persona.avatar}</span>
+                    ) : (
+                      <div className={`w-2 h-2 rounded-full ${dotClass}`} />
+                    )}
+                    {persona && (a.status === 'RUNNING' || a.status === 'CREATING' || a.status === 'ERRORED') && (
+                      <span className={`absolute -top-0.5 -right-0.5 w-[7px] h-[7px] rounded-full ring-2 ring-[#1a1a1a] ${dotClass}`} />
+                    )}
+                  </span>
                   <span className="truncate flex-1">{label}</span>
                   <span className="text-[10px] text-text-muted flex-shrink-0">{timeAgo(a.createdAt)}</span>
                 </button>

@@ -1,5 +1,13 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { requireAuth, cursorFetch, handleError } from './_lib/cursor.js'
+import {
+  requireAuth,
+  cursorFetch,
+  handleError,
+  agentMatchesConfiguredRepository,
+  getConversationTailLimit,
+  tailConversationMessages,
+  detectPersonaFromMessages,
+} from './_lib/cursor.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ ok: false })
@@ -13,10 +21,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const statusData = await cursorFetch('GET', `/v0/agents/${cursor_agent_id}`) as Record<string, any>
     const target = (statusData.target ?? {}) as Record<string, any>
 
+    if (!agentMatchesConfiguredRepository(statusData as Record<string, unknown>)) {
+      return res.status(404).json({
+        ok: false,
+        message: 'Agent is not associated with this app repository.',
+      })
+    }
+
     let messages: Record<string, any>[] = []
+    let messages_total: number | undefined
+    let messages_truncated = false
+    let persona_id: string | null = null
     try {
       const convData = await cursorFetch('GET', `/v0/agents/${cursor_agent_id}/conversation`) as Record<string, any>
-      messages = (convData.messages ?? []) as Record<string, any>[]
+      const all = (convData.messages ?? []) as Record<string, any>[]
+      persona_id = detectPersonaFromMessages(all)
+      const limit = getConversationTailLimit()
+      const { tail, total, truncated } = tailConversationMessages(all, limit)
+      messages = tail
+      messages_total = truncated ? total : undefined
+      messages_truncated = truncated
     } catch {
       // conversation may not be available yet
     }
@@ -29,6 +53,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       url: target.url ?? null,
       pr_url: target.prUrl ?? null,
       messages,
+      messages_truncated,
+      ...(messages_total !== undefined ? { messages_total } : {}),
+      ...(persona_id ? { persona_id } : {}),
     })
   } catch (err) {
     return handleError(res, err)

@@ -7,6 +7,7 @@ interface Props {
 
 export default function ChatInput({ onSend, disabled }: Props) {
   const [value, setValue] = useState('')
+  const [focused, setFocused] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
@@ -35,8 +36,17 @@ export default function ChatInput({ onSend, disabled }: Props) {
     el.style.height = Math.min(el.scrollHeight, 160) + 'px'
   }
 
+  const canSend = !!value.trim() && !disabled
+
   return (
-    <div className="flex items-end gap-2">
+    <div
+      className={`
+        relative flex items-end gap-0
+        bg-surface rounded-2xl border transition-all duration-200
+        ${focused ? 'border-white/20 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_2px_12px_rgba(0,0,0,0.4)]' : 'border-border'}
+        ${disabled ? 'opacity-60' : ''}
+      `}
+    >
       <textarea
         ref={ref}
         value={value}
@@ -44,36 +54,39 @@ export default function ChatInput({ onSend, disabled }: Props) {
           setValue(e.target.value)
           autoResize()
         }}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         onKeyDown={handleKeyDown}
         disabled={disabled}
         rows={1}
-        placeholder="Send a message..."
+        placeholder="Message..."
         className="
-          flex-1 resize-none bg-surface border border-border rounded-xl
-          px-4 py-3 text-[14.5px] text-text placeholder:text-text-muted
-          focus:outline-none focus:border-border-focus
-          transition-colors duration-150
-          disabled:opacity-50 font-[inherit]
+          flex-1 resize-none bg-transparent
+          pl-4 pr-2 py-3 text-[14px] text-text placeholder:text-text-muted
+          focus:outline-none
+          disabled:cursor-default font-[inherit]
           leading-[1.5]
         "
       />
-      <button
-        onClick={submit}
-        disabled={disabled || !value.trim()}
-        aria-label="Send"
-        className="
-          flex-shrink-0 w-[42px] h-[42px]
-          flex items-center justify-center rounded-xl
-          bg-white text-black
-          disabled:opacity-20 disabled:cursor-default
-          hover:bg-white/90 transition-all duration-150
-          cursor-pointer
-        "
-      >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <path d="M8 2L8 14M8 2L3 7M8 2L13 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-      </button>
+      <div className="pr-2 pb-2 pt-1 flex-shrink-0">
+        <button
+          onClick={submit}
+          disabled={!canSend}
+          aria-label="Send"
+          className={`
+            w-8 h-8 flex items-center justify-center rounded-full
+            transition-all duration-200 cursor-pointer
+            ${canSend
+              ? 'bg-white text-black hover:bg-white/90 scale-100'
+              : 'bg-white/10 text-text-muted scale-95 cursor-default'
+            }
+          `}
+        >
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+            <path d="M8 13V3M8 3L4 7M8 3L12 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </button>
+      </div>
     </div>
   )
 }
