@@ -62,7 +62,7 @@ export default function ChatInput({ onSend, disabled }: Props) {
         placeholder="Message..."
         className="
           flex-1 resize-none bg-transparent
-          pl-4 pr-2 py-3 text-[14px] text-text placeholder:text-text-muted
+          pl-4 pr-2 py-3 text-[16px] md:text-[14px] text-text placeholder:text-text-muted
           focus:outline-none
           disabled:cursor-default font-[inherit]
           leading-[1.5]
