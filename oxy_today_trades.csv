@@ -1,2 +1,0 @@
-name,type,strike,expiration,contracts,entry_price,entry_cost,target_price,stop_price,oxy_target,oxy_stop,delta,gamma,theta,iv,time_exit,strategy
-GAMMA SCALP,CALL,58.0,2026-03-20,1,0.9,90.0,1.1700000000000002,0.54,58.698167238023764,57.60577594785308,0.5767164253951218,0.2970239051567328,-0.19505684299644654,0.372076591796875,End of day today (avoid overnight theta),Quick intraday scalp on high gamma ATM option
