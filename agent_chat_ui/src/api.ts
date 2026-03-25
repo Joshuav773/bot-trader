@@ -1,5 +1,14 @@
 const BASE = '/api'
 const STORAGE_KEY = 'agent_chat_api_key'
+const PERSONA_PREFIX = 'persona:'
+
+export function cachePersona(cursorAgentId: string, personaId: string) {
+  try { localStorage.setItem(`${PERSONA_PREFIX}${cursorAgentId}`, personaId) } catch { /* quota */ }
+}
+
+export function getCachedPersona(cursorAgentId: string): string | null {
+  try { return localStorage.getItem(`${PERSONA_PREFIX}${cursorAgentId}`) } catch { return null }
+}
 
 export function getStoredKey(): string | null {
   return localStorage.getItem(STORAGE_KEY)
@@ -81,6 +90,11 @@ export interface StatusResponse {
   pr_url: string | null
   messages: { id: string; type: string; text: string }[]
   message?: string
+  /** True when the server only returned the last N messages (see AGENT_CHAT_CONVERSATION_TAIL). */
+  messages_truncated?: boolean
+  messages_total?: number
+  /** Persona detected from the first user message (e.g. "options-trader"). */
+  persona_id?: string | null
 }
 
 export async function pollStatus(cursorAgentId: string): Promise<StatusResponse> {
@@ -88,8 +102,14 @@ export async function pollStatus(cursorAgentId: string): Promise<StatusResponse>
     method: 'POST',
     body: JSON.stringify({ cursor_agent_id: cursorAgentId }),
   })
-  if (!res.ok && res.status !== 401) throw new Error(`Server error: ${res.status}`)
-  return res.json()
+  const data = (await res.json()) as StatusResponse & { message?: string }
+  if (!res.ok && res.status !== 401) {
+    throw new Error(data?.message ?? `Server error: ${res.status}`)
+  }
+  if (!data.ok) {
+    throw new Error(data.message ?? 'Request failed')
+  }
+  return data
 }
 
 export async function stopAgent(cursorAgentId: string) {
@@ -105,6 +125,8 @@ export interface AgentListItem {
   status: string
   summary: string | null
   createdAt: string
+  /** Persona inferred from agent name (e.g. "options-trader", "forex-trader"). */
+  persona: string | null
 }
 
 export async function listAgents(): Promise<AgentListItem[]> {

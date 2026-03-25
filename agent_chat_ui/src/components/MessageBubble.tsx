@@ -16,54 +16,55 @@ export default function MessageBubble({ message }: Props) {
     return <ThinkingBlock content={message.content} agentLabel={agent?.label} />
   }
 
+  if (isUser) {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[78%] md:max-w-[65%]">
+          <div className="
+            px-4 py-2.5 rounded-[20px] rounded-br-md
+            bg-white/[0.12] text-text text-[14px] leading-relaxed
+            whitespace-pre-wrap break-words
+          ">
+            {message.content || <span className="text-text-muted italic">Waiting for agent...</span>}
+          </div>
+          <div className="text-right mt-1 pr-1">
+            <span className="text-[10px] text-text-muted/70">{formatTime(message.timestamp)}</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
-      {!isUser && (
-        <div className="w-7 h-7 rounded-full bg-white/[0.07] flex items-center justify-center text-sm text-text-secondary flex-shrink-0 mt-0.5">
-          {agent?.avatar ?? '◎'}
-        </div>
-      )}
+    <div className="flex gap-3 items-start">
+      <div className="w-7 h-7 rounded-full bg-white/[0.06] border border-white/[0.06] flex items-center justify-center text-[13px] flex-shrink-0 mt-0.5">
+        {agent?.avatar ?? '◎'}
+      </div>
 
-      <div className={`min-w-0 ${isUser ? 'max-w-[72%]' : 'max-w-full'}`}>
-        {!isUser && (
-          <span className="text-[11px] text-text-muted font-medium uppercase tracking-wider mb-1 block">
-            {agent?.label ?? 'Agent'}
-          </span>
-        )}
+      <div className="min-w-0 flex-1 max-w-[calc(100%-3rem)]">
+        <span className="text-[11px] text-text-muted font-medium tracking-wide mb-1.5 block">
+          {agent?.label ?? 'Agent'}
+        </span>
 
-        <div
-          className={`
-            px-4 py-2.5 rounded-2xl text-[14.5px] leading-relaxed break-words
-            ${isUser
-              ? 'bg-user-bubble text-white rounded-br-md whitespace-pre-wrap'
-              : 'bg-agent-bubble text-text'
-            }
-          `}
-        >
-          {isUser ? (
-            message.content || <span className="text-text-muted italic">Waiting for agent...</span>
-          ) : (
-            <div className="prose-agent">
-              <Markdown>{message.content}</Markdown>
-            </div>
-          )}
+        <div className="text-[14px] leading-[1.7] text-text">
+          <div className="prose-agent">
+            <Markdown>{message.content}</Markdown>
+          </div>
         </div>
 
-        <div className="flex items-center gap-3 mt-1">
-          <span className="text-[10px] text-text-muted">
-            {formatTime(message.timestamp)}
-          </span>
+        <div className="flex items-center gap-3 mt-2">
+          <span className="text-[10px] text-text-muted/70">{formatTime(message.timestamp)}</span>
           {message.meta && (
-            <span className="text-[10px] text-text-muted">
+            <span className="text-[10px]">
               {message.meta.split(' | ').map((link, i) => (
                 <a
                   key={i}
                   href={link}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-400 hover:text-blue-300 underline mr-2"
+                  className="text-blue-400/80 hover:text-blue-400 underline underline-offset-2 mr-2"
                 >
-                  {link.includes('pull') ? 'PR' : 'View Agent'}
+                  {link.includes('pull') ? 'PR' : 'View'}
                 </a>
               ))}
             </span>
@@ -82,20 +83,19 @@ function ThinkingBlock({ content, agentLabel }: { content: string; agentLabel?: 
     : content
 
   return (
-    <div className="flex gap-3 justify-start">
+    <div className="flex gap-3 items-start">
       <div className="w-7 h-7 flex items-center justify-center flex-shrink-0 mt-0.5">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="text-text-muted">
-          <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" strokeDasharray="3 2" />
-          <circle cx="8" cy="8" r="2" fill="currentColor" />
-        </svg>
+        <div className="w-5 h-5 rounded-full border border-white/10 flex items-center justify-center">
+          <div className="w-1.5 h-1.5 rounded-full bg-text-muted" />
+        </div>
       </div>
 
       <button
         onClick={() => setExpanded(!expanded)}
         className="min-w-0 text-left cursor-pointer group"
       >
-        <span className="text-[11px] text-text-muted font-medium uppercase tracking-wider mb-1 flex items-center gap-1.5">
-          <span>{agentLabel ?? 'Agent'} — thinking</span>
+        <span className="text-[11px] text-text-muted font-medium tracking-wide mb-1.5 flex items-center gap-1.5">
+          <span>{agentLabel ?? 'Agent'} thinking</span>
           <svg
             width="10"
             height="10"
@@ -109,7 +109,7 @@ function ThinkingBlock({ content, agentLabel }: { content: string; agentLabel?: 
 
         <div
           className={`
-            px-3 py-2 rounded-lg border border-white/[0.04] bg-white/[0.02]
+            px-3 py-2 rounded-xl border border-white/[0.05] bg-white/[0.02]
             text-[13px] leading-relaxed text-text-muted whitespace-pre-wrap break-words
             font-mono transition-all duration-200
             ${expanded ? 'max-h-[600px] overflow-y-auto' : 'max-h-[3.5em] overflow-hidden'}

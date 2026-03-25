@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react'
 
-export default function TypingIndicator() {
+interface Props {
+  label?: string
+}
+
+export default function TypingIndicator({ label = 'Thinking' }: Props) {
   const [elapsed, setElapsed] = useState(0)
 
   useEffect(() => {
@@ -12,20 +16,17 @@ export default function TypingIndicator() {
 
   return (
     <div className="flex gap-3 items-start">
-      <div className="w-7 h-7 rounded-full bg-white/[0.07] flex items-center justify-center flex-shrink-0">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="text-text-muted animate-spin" style={{ animationDuration: '2s' }}>
-          <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" strokeDasharray="3 2" />
-          <circle cx="8" cy="8" r="2" fill="currentColor" />
-        </svg>
+      <div className="w-7 h-7 rounded-full bg-white/[0.06] border border-white/[0.06] flex items-center justify-center flex-shrink-0">
+        <div className="w-3 h-3 rounded-full border-2 border-text-muted border-t-transparent animate-spin" />
       </div>
-      <div className="flex flex-col gap-1 pt-1">
-        <span className="text-[11px] text-text-muted font-medium uppercase tracking-wider">
-          Agent is thinking... <span className="font-mono text-text-secondary">{fmt}</span>
+      <div className="flex flex-col gap-1.5 pt-0.5">
+        <span className="text-[11px] text-text-muted font-medium tracking-wide">
+          {label} <span className="text-text-muted/60 font-mono ml-0.5">{fmt}</span>
         </span>
-        <div className="flex gap-1 items-center">
-          <span className="w-1.5 h-1.5 rounded-full bg-text-muted animate-bounce [animation-delay:0ms]" />
-          <span className="w-1.5 h-1.5 rounded-full bg-text-muted animate-bounce [animation-delay:150ms]" />
-          <span className="w-1.5 h-1.5 rounded-full bg-text-muted animate-bounce [animation-delay:300ms]" />
+        <div className="flex gap-[5px] items-center h-4">
+          <span className="typing-dot w-[5px] h-[5px] rounded-full bg-text-muted/60" style={{ animationDelay: '0ms' }} />
+          <span className="typing-dot w-[5px] h-[5px] rounded-full bg-text-muted/60" style={{ animationDelay: '160ms' }} />
+          <span className="typing-dot w-[5px] h-[5px] rounded-full bg-text-muted/60" style={{ animationDelay: '320ms' }} />
         </div>
       </div>
     </div>
