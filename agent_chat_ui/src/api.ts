@@ -1,14 +1,5 @@
 const BASE = '/api'
 const STORAGE_KEY = 'agent_chat_api_key'
-const PERSONA_PREFIX = 'persona:'
-
-export function cachePersona(cursorAgentId: string, personaId: string) {
-  try { localStorage.setItem(`${PERSONA_PREFIX}${cursorAgentId}`, personaId) } catch { /* quota */ }
-}
-
-export function getCachedPersona(cursorAgentId: string): string | null {
-  try { return localStorage.getItem(`${PERSONA_PREFIX}${cursorAgentId}`) } catch { return null }
-}
 
 export function getStoredKey(): string | null {
   return localStorage.getItem(STORAGE_KEY)
@@ -55,83 +46,143 @@ export async function authenticate(apiKey: string): Promise<boolean> {
   return false
 }
 
-export interface LaunchResponse {
-  ok: boolean
-  cursor_agent_id: string | null
-  status: string | null
-  url: string | null
-  message?: string
+// ── Streaming chat ──────────────────────────────────────────────────────
+
+export interface StreamCallbacks {
+  onConversationId: (id: string, agentId: string) => void
+  onToken: (text: string) => void
+  onThinking: (text: string) => void
+  onToolUse: (tool: string, input: Record<string, unknown>) => void
+  onToolResult: (tool: string, result: string) => void
+  onDone: () => void
+  onError: (err: Error) => void
 }
 
-export async function launchAgent(prompt: string, agentId: string): Promise<LaunchResponse> {
-  const res = await authedFetch(`${BASE}/launch`, {
-    method: 'POST',
-    body: JSON.stringify({ prompt, agent_id: agentId }),
+export function streamChat(
+  conversationId: string | null,
+  prompt: string,
+  agentId: string,
+  callbacks: StreamCallbacks,
+  signal?: AbortSignal,
+): void {
+  const url = `${BASE}/chat`
+  const body = JSON.stringify({
+    prompt,
+    agent_id: agentId,
+    conversation_id: conversationId,
   })
-  if (!res.ok && res.status !== 401) throw new Error(`Server error: ${res.status}`)
-  return res.json()
-}
 
-export async function followUp(prompt: string, agentId: string, cursorAgentId: string): Promise<LaunchResponse> {
-  const res = await authedFetch(`${BASE}/followup`, {
+  fetch(url, {
     method: 'POST',
-    body: JSON.stringify({ prompt, agent_id: agentId, cursor_agent_id: cursorAgentId }),
+    headers: authHeaders(),
+    body,
+    signal,
   })
-  if (!res.ok && res.status !== 401) throw new Error(`Server error: ${res.status}`)
-  return res.json()
+    .then(async (res) => {
+      if (res.status === 401) {
+        clearKey()
+        window.location.reload()
+        return
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        callbacks.onError(new Error(data.message || `Server error: ${res.status}`))
+        return
+      }
+
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+
+        const lines = buffer.split('\n')
+        buffer = lines.pop()! // keep incomplete line in buffer
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith('data: ')) continue
+
+          try {
+            const payload = JSON.parse(trimmed.slice(6))
+            const type = payload.type ?? payload.data?.type
+
+            switch (type) {
+              case 'conversation_id':
+                callbacks.onConversationId(payload.id ?? payload.data?.id, payload.agent_id ?? payload.data?.agent_id)
+                break
+              case 'text_delta':
+                callbacks.onToken(payload.data?.text ?? payload.text ?? '')
+                break
+              case 'thinking_delta':
+                callbacks.onThinking(payload.data?.text ?? payload.text ?? '')
+                break
+              case 'tool_use':
+                callbacks.onToolUse(payload.data?.tool ?? '', payload.data?.input ?? {})
+                break
+              case 'tool_result':
+                callbacks.onToolResult(payload.data?.tool ?? '', payload.data?.result ?? '')
+                break
+              case 'done':
+                callbacks.onDone()
+                break
+              case 'error':
+                callbacks.onError(new Error(payload.data?.message ?? 'Unknown error'))
+                break
+            }
+          } catch {
+            // Ignore malformed SSE lines
+          }
+        }
+      }
+
+      // If stream ended without an explicit done event, notify done
+      callbacks.onDone()
+    })
+    .catch((err) => {
+      if (err.name === 'AbortError') {
+        callbacks.onDone()
+        return
+      }
+      callbacks.onError(err)
+    })
 }
 
-export interface StatusResponse {
-  ok: boolean
-  cursor_agent_id: string
-  status: string
-  summary: string | null
-  url: string | null
-  pr_url: string | null
-  messages: { id: string; type: string; text: string }[]
-  message?: string
-  /** True when the server only returned the last N messages (see AGENT_CHAT_CONVERSATION_TAIL). */
-  messages_truncated?: boolean
-  messages_total?: number
-  /** Persona detected from the first user message (e.g. "options-trader"). */
-  persona_id?: string | null
-}
+// ── Conversations ───────────────────────────────────────────────────────
 
-export async function pollStatus(cursorAgentId: string): Promise<StatusResponse> {
-  const res = await authedFetch(`${BASE}/status`, {
-    method: 'POST',
-    body: JSON.stringify({ cursor_agent_id: cursorAgentId }),
-  })
-  const data = (await res.json()) as StatusResponse & { message?: string }
-  if (!res.ok && res.status !== 401) {
-    throw new Error(data?.message ?? `Server error: ${res.status}`)
-  }
-  if (!data.ok) {
-    throw new Error(data.message ?? 'Request failed')
-  }
-  return data
-}
-
-export async function stopAgent(cursorAgentId: string) {
-  await authedFetch(`${BASE}/stop`, {
-    method: 'POST',
-    body: JSON.stringify({ cursor_agent_id: cursorAgentId }),
-  })
-}
-
-export interface AgentListItem {
+export interface ConversationListItem {
   id: string
-  name: string | null
+  agentId: string
+  title: string | null
   status: string
-  summary: string | null
   createdAt: string
-  /** Persona inferred from agent name (e.g. "options-trader", "forex-trader"). */
-  persona: string | null
 }
 
-export async function listAgents(): Promise<AgentListItem[]> {
-  const res = await authedFetch(`${BASE}/agents`)
+export interface ConversationDetail {
+  id: string
+  agentId: string
+  title: string | null
+  status: string
+  messages: { id: string; role: 'user' | 'assistant'; type?: 'thinking'; text: string; createdAt: string }[]
+}
+
+export async function listConversations(): Promise<ConversationListItem[]> {
+  const res = await authedFetch(`${BASE}/conversations`)
   if (!res.ok && res.status !== 401) throw new Error(`Server error: ${res.status}`)
   const data = await res.json()
-  return data.agents ?? []
+  return data.conversations ?? []
+}
+
+export async function getConversation(id: string): Promise<ConversationDetail> {
+  const res = await authedFetch(`${BASE}/conversations?id=${encodeURIComponent(id)}`)
+  if (!res.ok && res.status !== 401) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.message ?? `Server error: ${res.status}`)
+  }
+  const data = await res.json()
+  return data.conversation
 }

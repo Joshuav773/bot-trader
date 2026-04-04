@@ -5,9 +5,10 @@ import { agents } from '../agents'
 
 interface Props {
   message: Message
+  streaming?: boolean
 }
 
-export default function MessageBubble({ message }: Props) {
+export default function MessageBubble({ message, streaming }: Props) {
   const isUser = message.role === 'user'
   const isThinking = message.type === 'thinking'
   const agent = agents.find((a) => a.id === message.agentId)
@@ -49,6 +50,7 @@ export default function MessageBubble({ message }: Props) {
         <div className="text-[14px] leading-[1.7] text-text">
           <div className="prose-agent">
             <Markdown>{message.content}</Markdown>
+            {streaming && <span className="inline-block w-[2px] h-[1em] bg-blue-400 animate-pulse align-text-bottom ml-0.5" />}
           </div>
         </div>
 
