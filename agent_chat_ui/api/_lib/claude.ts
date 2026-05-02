@@ -2,8 +2,9 @@ import type { VercelRequest } from '@vercel/node'
 import Anthropic from '@anthropic-ai/sdk'
 import { config } from 'dotenv'
 import { resolve } from 'path'
-import { readFileSync } from 'fs'
+import { readFileSync, readdirSync, existsSync } from 'fs'
 import type { Session, DisplayMessage } from './sessions.js'
+import { saveSession } from './sessions.js'
 
 config({ path: resolve(process.cwd(), '.env.local') })
 config({ path: resolve(process.cwd(), '../.env') })
@@ -46,9 +47,20 @@ function client(): Anthropic {
 
 // ── Persona / system prompt ─────────────────────────────────────────────
 
-const AGENT_CONFIG: Record<string, { label: string; personaFile: string }> = {
-  'options-trader': { label: 'Options Analyst (The Quant Oracle)', personaFile: 'options-trader-agent.json' },
-  'forex-trader': { label: 'Forex Trader (The Global Macro Sentinel)', personaFile: 'forex-trader-agent.json' },
+const AGENT_CONFIG: Record<string, { label: string }> = {
+  'options-trader': { label: 'Options Analyst (The Quant Oracle)' },
+  'forex-trader': { label: 'Forex Trader (The Global Macro Sentinel)' },
+}
+
+// Resolve the agents/ directory — first try sibling of cwd, fall back to cwd itself
+function agentsRoot(): string {
+  const sibling = resolve(process.cwd(), '..', 'agents')
+  if (existsSync(sibling)) return sibling
+  return resolve(process.cwd(), 'agents')
+}
+
+function agentFolder(agentId: string): string {
+  return resolve(agentsRoot(), agentId)
 }
 
 const personaCache = new Map<string, string>()
@@ -56,30 +68,43 @@ const personaCache = new Map<string, string>()
 function loadPersonaJson(agentId: string): string {
   if (personaCache.has(agentId)) return personaCache.get(agentId)!
 
-  const cfg = AGENT_CONFIG[agentId] ?? AGENT_CONFIG['options-trader']
-  const agentsDir = resolve(process.cwd(), '..', 'agents')
-  const filePath = resolve(agentsDir, cfg.personaFile)
-
+  const filePath = resolve(agentFolder(agentId), `${agentId}-agent.json`)
   try {
     const raw = readFileSync(filePath, 'utf-8')
     personaCache.set(agentId, raw)
     return raw
   } catch {
-    // Fallback: try from cwd
-    try {
-      const alt = resolve(process.cwd(), 'agents', cfg.personaFile)
-      const raw = readFileSync(alt, 'utf-8')
-      personaCache.set(agentId, raw)
-      return raw
-    } catch {
-      return JSON.stringify({ error: `Could not load ${cfg.personaFile}` })
-    }
+    return JSON.stringify({ error: `Could not load ${filePath}` })
+  }
+}
+
+function loadContextFiles(agentId: string): { name: string; content: string }[] {
+  const contextDir = resolve(agentFolder(agentId), 'context')
+  if (!existsSync(contextDir)) return []
+
+  try {
+    const files = readdirSync(contextDir)
+      .filter((f) => f.endsWith('.md'))
+      .sort()
+    return files.map((name) => ({
+      name,
+      content: readFileSync(resolve(contextDir, name), 'utf-8'),
+    }))
+  } catch {
+    return []
   }
 }
 
 export function buildSystemPrompt(agentId: string): string {
   const cfg = AGENT_CONFIG[agentId] ?? AGENT_CONFIG['options-trader']
   const personaJson = loadPersonaJson(agentId)
+  const contextFiles = loadContextFiles(agentId)
+
+  const contextSection = contextFiles.length
+    ? `\n<context_files>\n${contextFiles
+        .map((f) => `<file path="agents/${agentId}/context/${f.name}">\n${f.content}\n</file>`)
+        .join('\n\n')}\n</context_files>\n\nThe files above contain your protocols, learned behaviors, ledgers, and operational context. Use them on every response — they define how you think and respond. Update them as you learn new things.\n`
+    : ''
 
   return `You are ${cfg.label}.
 
@@ -88,17 +113,22 @@ Below is your full persona definition. Follow the system_prompt, analytical_fram
 <persona>
 ${personaJson}
 </persona>
-
+${contextSection}
 You have access to GitHub tools that let you read files, search code, create branches, update files, and create pull requests in the repository.
 
 ## Self-Evolution
-Your persona file lives at \`agents/${cfg.personaFile}\` in the repo. You should actively evolve it:
+Your files live in \`agents/${agentId}/\` in the repo:
+- Persona: \`agents/${agentId}/${agentId}-agent.json\`
+- Context (protocols, ledgers, learnings): \`agents/${agentId}/context/*.md\`
 
-- **After meaningful conversations**: If the user shares trading preferences, risk tolerances, preferred instruments, market biases, or feedback on your analysis — use your GitHub tools to update your persona file with this new context.
-- **Add to the \`learned_context\` field**: Append new entries with a date and what you learned. Create this field if it does not exist yet.
-- **Refine your framework**: If a strategy or approach proves valuable (or flawed), update your \`analytical_framework\`, \`battle_plans\`/\`operational_scenarios\`, or \`decision_logic\` accordingly.
-- **Be selective**: Only persist insights that will improve future conversations. Don't save trivial or one-off details.
-- **Commit directly to main** with a clear message like "update persona: added user risk preference" — no branches or PRs needed for persona updates.
+You should actively evolve these:
+
+- **After meaningful conversations**: If the user shares trading preferences, risk tolerances, preferred instruments, market biases, or feedback on your analysis — use your GitHub tools to update your persona or context files.
+- **Add to the \`learned_context\` field** in your persona JSON for structured learnings.
+- **Create or update context markdown files** for protocols, ledgers, trade journals, or reference material. Use clear filenames like \`ACCOUNT_LEDGER.md\`, \`PROTOCOL.md\`, \`MARKET_REGIME.md\`.
+- **Refine your framework**: If a strategy proves valuable (or flawed), update your \`analytical_framework\`, \`battle_plans\`/\`operational_scenarios\`, or \`decision_logic\` accordingly.
+- **Be selective**: Only persist insights that will improve future conversations.
+- **Commit directly to main** with a clear message like "update persona: added user risk preference".
 
 This is how you learn and get better over time. Each conversation should leave you sharper than the last.
 
@@ -158,7 +188,7 @@ function friendlyError(err: unknown): string {
   return raw
 }
 
-const DEFAULT_MODEL = 'claude-sonnet-4-6-20250514'
+const DEFAULT_MODEL = 'claude-sonnet-4-6'
 
 export async function* runAgentLoop(
   session: Session,
@@ -181,6 +211,9 @@ export async function* runAgentLoop(
   if (!session.title) {
     session.title = userMessage.slice(0, 60) + (userMessage.length > 60 ? '...' : '')
   }
+
+  // Persist user message immediately so a mid-stream failure doesn't lose it
+  saveSession(session)
 
   const systemPrompt = buildSystemPrompt(session.agentId)
   const model = process.env.CLAUDE_MODEL || DEFAULT_MODEL
@@ -284,6 +317,10 @@ export async function* runAgentLoop(
       createdAt: new Date().toISOString(),
     })
   }
+
+  // Persist full assistant response so follow-ups see complete history
+  session.updatedAt = new Date().toISOString()
+  saveSession(session)
 
   yield { type: 'done', data: { status: 'finished' } }
 }

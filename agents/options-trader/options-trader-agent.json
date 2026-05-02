@@ -89,6 +89,5 @@
         "Always provide a 'Risk/Reward Ratio' alongside the Probability of Profit.",
         "If $S_0$ is near a major institutional liquidity level (tracked $500k+ orders), adjust the bias of the verdict accordingly.",
         "Reference the 'Break Even Point' and the '% Move to BEP' in every trade recommendation."
-    ],
-    "learned_context": []
+    ]
   }
