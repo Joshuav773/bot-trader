@@ -10,6 +10,10 @@ config({ path: resolve(process.cwd(), '../.env') })
 const PAPER_BASE = 'https://paper-api.alpaca.markets'
 const DATA_BASE = 'https://data.alpaca.markets'
 
+// Risk parameters (hard rules applied in placeOrder validation)
+const MAX_ACCOUNT_RISK_PCT = 2 // a single trade can never risk more than 2% of total account equity
+// (TP1 +20% is a target documented in EXECUTION_PROTOCOL.md — not enforced in code)
+
 function tradingBase(): string {
   const url = process.env.ALPACA_BASE_URL || PAPER_BASE
   // Hard guard: refuse anything that isn't the paper endpoint until we explicitly
@@ -162,15 +166,22 @@ export const ALPACA_TOOLS: Anthropic.Tool[] = [
         stop_price: { type: 'number', description: 'Required for stop / stop_limit orders.' },
         stop_loss_price: {
           type: 'number',
-          description: 'REQUIRED for stock buys: protective stop (bracket stop leg). Same stop is used for both halves on scale-out.',
+          description:
+            'REQUIRED for stock buys: protective stop (bracket stop leg). Same stop is used for both halves on scale-out. ' +
+            'HARD RULE: dollar risk on the trade — (entry − stop) × qty × multiplier — must not exceed 2% of total account equity. ' +
+            'Use alpaca_get_account first to check equity, then size qty so dollar risk stays within the 2% cap.',
         },
         take_profit_price: {
           type: 'number',
-          description: 'Single-target mode: take-profit price for a single bracket. Use only if NOT scaling out.',
+          description:
+            'Single-target mode: take-profit price for a single bracket. Use only if NOT scaling out. ' +
+            'TARGET (not enforced): aim for ~+20% from entry. If structural geometry only allows less, the trade can still be placed — but lower upside means lower priority.',
         },
         take_profit_1_price: {
           type: 'number',
-          description: 'Scale-out mode: TP1 price for the first half. Half-close happens here, then the runner stop should be trailed up.',
+          description:
+            'Scale-out mode: TP1 price for the first half. ' +
+            'TARGET (not enforced): aim for ~+20% from entry. We aim for high R/R but the rule layer no longer rejects below 20% — sizing is enforced by the 2% account-equity risk cap instead.',
         },
         take_profit_2_price: {
           type: 'number',
@@ -182,7 +193,10 @@ export const ALPACA_TOOLS: Anthropic.Tool[] = [
         },
         trail_stop_to_price: {
           type: 'number',
-          description: 'Scale-out mode: where the runner stop should move once TP1 fills. Recorded for later use with alpaca_advance_stop.',
+          description:
+            'Scale-out mode: where the runner stop moves once TP1 fills. ' +
+            'HARD RULE: must be >= take_profit_1_price (we always lock in TP1 profit on the runner — never give back gains). ' +
+            'Default to take_profit_1_price exactly unless there is a clear structural level just above TP1.',
         },
         rationale: {
           type: 'string',
@@ -355,6 +369,7 @@ async function placeOrder(input: Record<string, unknown>): Promise<ToolResult> {
     }
     const entry = limitPrice ?? stopPrice
     if (entry !== undefined) {
+      // Geometry sanity checks (not policy — just basic correctness)
       if (stopLossPrice >= entry) {
         return { content: `Trade rejected: stop_loss_price ($${stopLossPrice}) must be below entry ($${entry}) for a long.`, is_error: true }
       }
@@ -365,14 +380,50 @@ async function placeOrder(input: Record<string, unknown>): Promise<ToolResult> {
         if (tp2 !== undefined && tp1 !== undefined && tp2 <= tp1) {
           return { content: `Trade rejected: take_profit_2_price ($${tp2}) must be above take_profit_1_price ($${tp1}).`, is_error: true }
         }
-        if (trailTo !== undefined && (trailTo < stopLossPrice || trailTo >= (tp1 ?? Infinity))) {
-          return {
-            content: `Trade rejected: trail_stop_to_price ($${trailTo}) should sit between stop_loss_price ($${stopLossPrice}) and take_profit_1_price ($${tp1}).`,
-            is_error: true,
+        if (trailTo !== undefined && tp1 !== undefined && tp2 !== undefined) {
+          // Hard rule: always secure profits. Trail must lock in at least TP1's gain on the runner.
+          if (trailTo < tp1) {
+            return {
+              content:
+                `Trade rejected: trail_stop_to_price ($${trailTo}) must be >= take_profit_1_price ($${tp1}). ` +
+                `We always secure TP1 profits on the runner — trailing below TP1 would risk giving them back.`,
+              is_error: true,
+            }
+          }
+          if (trailTo >= tp2) {
+            return {
+              content: `Trade rejected: trail_stop_to_price ($${trailTo}) must be < take_profit_2_price ($${tp2}) (otherwise the stop would fire before TP2 can).`,
+              is_error: true,
+            }
           }
         }
       } else if (takeProfitPrice !== undefined && takeProfitPrice <= entry) {
         return { content: `Trade rejected: take_profit_price ($${takeProfitPrice}) must be above entry ($${entry}).`, is_error: true }
+      }
+
+      // ── Hard portfolio risk rule: never lose more than 2% of total account equity on a single trade ──
+      // Dollar risk = (entry − stop) × qty × multiplier. Compare against MAX_ACCOUNT_RISK_PCT % of equity.
+      try {
+        const account = (await alpacaFetch(tradingBase(), '/v2/account')) as Record<string, unknown>
+        const equity = Number(account.equity)
+        if (Number.isFinite(equity) && equity > 0) {
+          const stopMultiplier = isOption ? 100 : 1
+          const dollarRisk = (entry - stopLossPrice) * qty * stopMultiplier
+          const maxRisk = equity * (MAX_ACCOUNT_RISK_PCT / 100)
+          if (dollarRisk > maxRisk) {
+            return {
+              content:
+                `Trade rejected: dollar risk on this trade is $${dollarRisk.toFixed(2)} ` +
+                `(${((dollarRisk / equity) * 100).toFixed(2)}% of $${equity.toFixed(2)} equity), ` +
+                `exceeds the ${MAX_ACCOUNT_RISK_PCT}% max. ` +
+                `Lower qty or tighten the stop. Suggested max qty at this stop = ` +
+                `${Math.floor(maxRisk / Math.max(0.01, (entry - stopLossPrice) * stopMultiplier))}.`,
+              is_error: true,
+            }
+          }
+        }
+      } catch {
+        // If we can't fetch equity, fall through — better to let the broker's buying-power check catch it
       }
     }
   }

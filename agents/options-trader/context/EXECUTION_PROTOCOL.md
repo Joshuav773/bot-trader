@@ -65,6 +65,38 @@ After confirmation, call `alpaca_place_order` with: `take_profit_1_price`, `take
 
 ## 🚨 RISK MANAGEMENT (HARD RULES)
 
+### **Risk Parameters**
+
+**Hard rule (enforced by the tool layer — trades that violate are rejected):**
+
+- **Per-trade dollar risk ≤ 2% of total account equity.** Risk = `(entry − stop) × qty × multiplier`. The tool fetches live equity from Alpaca and rejects any order whose risk exceeds 2%. To pass, you must size qty appropriately for the chosen stop distance.
+
+**Targets (aim for, not enforced):**
+
+- **TP1**: aim for **+20%** from entry. Higher is better. If geometry only supports +12%, you can still take the trade — but expect lower R/R and weight conviction accordingly.
+- **TP2**: above TP1. Typically +30% to +60% on solid setups.
+- **Trail stop**: must be ≥ TP1 (this *is* enforced — we always lock in TP1 gains on the runner).
+
+### **Sizing Workflow**
+
+Always size for risk, not for upside. Before proposing:
+
+1. **Call `alpaca_get_account`** to read current equity
+2. **Compute max risk**: `equity × 0.02`
+3. **Pick the stop distance** based on structural invalidation (chart context — not an arbitrary %)
+4. **Size qty**: `floor(max_risk / (entry − stop) / multiplier)` (where multiplier = 100 for options, 1 for stocks)
+5. **If qty rounds to zero**, the trade is too risky to size meaningfully — skip or wait for a tighter stop
+
+**Example:**
+```
+Equity: $50,000  →  Max risk = $1,000
+AAPL entry $185, structural stop $178 (-3.8%)  →  Risk per share = $7
+Max qty = floor(1000 / 7) = 142 shares
+Notional = 142 × $185 = $26,270 (well within buying power)
+```
+
+Wide stops are fine if they're structurally justified — you just size smaller. Tight stops let you size bigger. The 2% account risk stays constant across both.
+
 ### **Position Sizing**
 - Never risk more than **2% of the account on a single trade** (where "risk" = entry minus stop, times qty).
 - The Alpaca account's buying power is the only hard ceiling — there is no extra software cap. Position sizing discipline is on you (and the protocol below).
@@ -116,9 +148,11 @@ When you call `alpaca_place_order` with `take_profit_1_price` + `take_profit_2_p
 
 Both fill at entry. Each bracket has its own stop + target. When TP1 fires, the trader leg closes and its stop auto-cancels (OCO). The runner is still active with the original stop.
 
-Always include `trail_stop_to_price` so you have a planned trail level recorded — typically:
-- Conservative: trail to **breakeven** (entry price)
-- Standard: trail to **TP1** (locks in TP1 gains on the runner if it pulls back)
+Always include `trail_stop_to_price` so the trail level is locked in up front. **HARD RULE: trail must always be >= TP1.** We never give back profits on the runner.
+
+- **Default**: trail_to = TP1 exactly (locks in TP1 gains, runner can only close at TP1 or better)
+- **Optional bump**: a structural level just above TP1 (e.g. a prior high), if it sits below TP2 — gives a tiny bit more room without risking gains
+- **Never**: below TP1 (the tool layer rejects this; "secure profits always" is non-negotiable)
 
 ### **Stocks — Single Target (Use Sparingly)**
 Only use `take_profit_price` (singular) when you genuinely don't want to scale out — e.g., fast scalp where TP2 doesn't exist. The bracket structure is the same, just one TP.
