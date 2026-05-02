@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import type { Message, Agent } from './types'
 import { defaultAgent } from './agents'
-import { launchAgent, followUp, pollStatus, stopAgent, getStoredKey, clearKey, cachePersona, getCachedPersona } from './api'
+import { streamChat, getConversation, getStoredKey, clearKey } from './api'
 import { agents as agentPresets } from './agents'
 import AgentSidebar from './components/AgentSidebar'
 import MessageBubble from './components/MessageBubble'
@@ -12,20 +12,6 @@ import LoginScreen from './components/LoginScreen'
 let nextId = 0
 function uid() {
   return String(++nextId)
-}
-
-const POLL_INTERVAL = 2500
-
-function messagesSignature(msgs: { id?: string }[]) {
-  return msgs.map((m) => m.id ?? '').join('\u0001')
-}
-
-function displayContent(role: 'user' | 'agent', text: string): string {
-  if (role !== 'user') return text
-  if (!text.includes('Read and adopt the full persona') || !text.includes('\n\n')) return text
-  const idx = text.indexOf('\n\n')
-  const after = text.slice(idx + 2).trim()
-  return after || text
 }
 
 export default function App() {
@@ -42,28 +28,16 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
   const [loadingReason, setLoadingReason] = useState<'history' | 'thinking'>('thinking')
-  const [agentStatus, setAgentStatus] = useState<string | null>(null)
   const [agent, setAgent] = useState<Agent>(defaultAgent)
-  const [cursorAgentId, setCursorAgentId] = useState<string | null>(null)
+  const [conversationId, setConversationId] = useState<string | null>(null)
   const [mobileSidebar, setMobileSidebar] = useState(false)
+  const [sidebarRefresh, setSidebarRefresh] = useState(0)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  /** Last applied server message IDs — works when the API returns a truncated tail. */
-  const lastServerMessagesSigRef = useRef('')
-  const [historyTruncated, setHistoryTruncated] = useState<{ total: number } | null>(null)
-
-  /** Resolve persona for a cursor agent and switch the active agent to match. */
-  function resolveAndSetPersona(cursorId: string, serverPersonaId?: string | null) {
-    const personaId =
-      getCachedPersona(cursorId) ??   // Tier 1: localStorage (instant)
-      serverPersonaId ??               // Tier 3: server detection
-      null
-    if (personaId) {
-      const match = agentPresets.find((a) => a.id === personaId)
-      if (match) setAgent(match)
-      cachePersona(cursorId, personaId)
-    }
-  }
+  const abortRef = useRef<AbortController | null>(null)
+  // Tracks the streaming assistant message being built token-by-token
+  const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null)
+  // Track if onDone has already fired for the current stream
+  const doneRef = useRef(false)
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -71,122 +45,13 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
 
   useEffect(scrollToBottom, [messages, loading, scrollToBottom])
 
+  // Cleanup abort on unmount
   useEffect(() => {
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current)
-    }
+    return () => { abortRef.current?.abort() }
   }, [])
 
-  function startPolling(agentId: string) {
-    if (pollingRef.current) clearInterval(pollingRef.current)
-
-    pollingRef.current = setInterval(async () => {
-      try {
-        const data = await pollStatus(agentId)
-        setAgentStatus(data.status)
-
-        if (data.messages) {
-          const sig = messagesSignature(data.messages)
-          if (sig !== lastServerMessagesSigRef.current) {
-            lastServerMessagesSigRef.current = sig
-            const next = data.messages.map((m: { id: string; type: string; text: string }) => {
-              const role = m.type === 'user_message' ? ('user' as const) : ('agent' as const)
-              return {
-                id: m.id || uid(),
-                role,
-                type: m.type === 'assistant_message' ? 'assistant_message' : m.type === 'user_message' ? undefined : 'thinking',
-                content: displayContent(role, m.text ?? ''),
-                timestamp: new Date(),
-                agentId: agent.id,
-              }
-            })
-            setMessages(next)
-            if (data.messages_truncated && typeof data.messages_total === 'number') {
-              setHistoryTruncated({ total: data.messages_total })
-            } else {
-              setHistoryTruncated(null)
-            }
-          }
-        }
-
-        const terminal = data.status === 'FINISHED' || data.status === 'STOPPED' || data.status === 'ERRORED'
-        if (terminal) {
-          if (pollingRef.current) clearInterval(pollingRef.current)
-          pollingRef.current = null
-          if (data.status === 'ERRORED') {
-            setMessages((prev) => [
-              ...prev,
-              { id: uid(), role: 'agent', content: 'Agent encountered an error.', timestamp: new Date(), agentId: agent.id },
-            ])
-          }
-          setLoading(false)
-        }
-      } catch {
-        if (pollingRef.current) clearInterval(pollingRef.current)
-        pollingRef.current = null
-        setMessages((prev) => [
-          ...prev,
-          { id: uid(), role: 'agent', content: 'Lost connection to agent.', timestamp: new Date(), agentId: agent.id },
-        ])
-        setLoading(false)
-      }
-    }, POLL_INTERVAL)
-  }
-
-  async function handleSelectAgent(id: string) {
-    if (pollingRef.current) clearInterval(pollingRef.current)
-    pollingRef.current = null
-
-    setCursorAgentId(id)
-    setLoadingReason('history')
-    setLoading(true)
-    setMessages([])
-    lastServerMessagesSigRef.current = ''
-    setHistoryTruncated(null)
-    setAgentStatus(null)
-
-    try {
-      const data = await pollStatus(id)
-      setAgentStatus(data.status)
-
-      resolveAndSetPersona(id, data.persona_id)
-      const resolvedPersona = getCachedPersona(id) ?? data.persona_id ?? agent.id
-
-      if (data.messages && data.messages.length > 0) {
-        lastServerMessagesSigRef.current = messagesSignature(data.messages)
-        const next = data.messages.map((m: { id: string; type: string; text: string }) => {
-          const role = m.type === 'user_message' ? ('user' as const) : ('agent' as const)
-          return {
-            id: m.id || uid(),
-            role,
-            type: m.type === 'assistant_message' ? 'assistant_message' : m.type === 'user_message' ? undefined : 'thinking',
-            content: displayContent(role, m.text ?? ''),
-            timestamp: new Date(),
-            agentId: resolvedPersona,
-          }
-        })
-        setMessages(next)
-        if (data.messages_truncated && typeof data.messages_total === 'number') {
-          setHistoryTruncated({ total: data.messages_total })
-        }
-      }
-
-      const isActive = data.status === 'RUNNING' || data.status === 'CREATING'
-      if (isActive) {
-        startPolling(id)
-      } else {
-        setLoading(false)
-      }
-    } catch {
-      setMessages([
-        { id: uid(), role: 'agent', content: 'Failed to load conversation.', timestamp: new Date(), agentId: agent.id },
-      ])
-      setLoading(false)
-    }
-
-  }
-
-  async function handleSend(text: string) {
+  function handleSend(text: string) {
+    // Add user message
     const userMsg: Message = {
       id: uid(),
       role: 'user',
@@ -198,93 +63,178 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
     setLoadingReason('thinking')
     setLoading(true)
 
-    try {
-      const data = cursorAgentId
-        ? await followUp(text, agent.id, cursorAgentId)
-        : await launchAgent(text, agent.id)
+    // Prepare abort controller
+    abortRef.current?.abort()
+    const abort = new AbortController()
+    abortRef.current = abort
+    doneRef.current = false
 
-      if (!data.ok) {
+    // Prepare a message ID for the streaming assistant response
+    const assistantMsgId = uid()
+    setStreamingMsgId(assistantMsgId)
+    let thinkingMsgId: string | null = null
+
+    streamChat(conversationId, text, agent.id, {
+      onConversationId: (id, agentId) => {
+        setConversationId(id)
+        // Resolve persona from server response
+        if (agentId) {
+          const match = agentPresets.find((a) => a.id === agentId)
+          if (match) setAgent(match)
+        }
+      },
+      onToken: (token) => {
+        setMessages((prev) => {
+          const existing = prev.find((m) => m.id === assistantMsgId)
+          if (existing) {
+            return prev.map((m) =>
+              m.id === assistantMsgId ? { ...m, content: m.content + token } : m,
+            )
+          }
+          // First token — create the assistant message
+          return [
+            ...prev,
+            {
+              id: assistantMsgId,
+              role: 'assistant' as const,
+              content: token,
+              timestamp: new Date(),
+              agentId: agent.id,
+            },
+          ]
+        })
+      },
+      onThinking: (token) => {
+        if (!thinkingMsgId) {
+          thinkingMsgId = uid()
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: thinkingMsgId!,
+              role: 'assistant' as const,
+              type: 'thinking' as const,
+              content: token,
+              timestamp: new Date(),
+              agentId: agent.id,
+            },
+          ])
+        } else {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === thinkingMsgId ? { ...m, content: m.content + token } : m,
+            ),
+          )
+        }
+      },
+      onToolUse: () => {
+        // Could show tool activity in UI — for now just keep loading state
+      },
+      onToolResult: () => {
+        // Tool results feed back into Claude — nothing to show yet
+      },
+      onDone: () => {
+        if (doneRef.current) return
+        doneRef.current = true
+        setStreamingMsgId(null)
+        setLoading(false)
+        setSidebarRefresh((n) => n + 1)
+      },
+      onError: (err) => {
+        if (doneRef.current) return
+        doneRef.current = true
+        setStreamingMsgId(null)
         setMessages((prev) => [
           ...prev,
-          { id: uid(), role: 'agent', content: data.message || 'Launch failed', timestamp: new Date(), agentId: agent.id },
+          {
+            id: uid(),
+            role: 'assistant',
+            content: `Error: ${err.message}`,
+            timestamp: new Date(),
+            agentId: agent.id,
+          },
         ])
         setLoading(false)
-        return
+      },
+    }, abort.signal)
+  }
+
+  async function handleSelectConversation(id: string) {
+    abortRef.current?.abort()
+    abortRef.current = null
+    setStreamingMsgId(null)
+
+    setConversationId(id)
+    setLoadingReason('history')
+    setLoading(true)
+    setMessages([])
+
+    try {
+      const data = await getConversation(id)
+
+      // Set persona from conversation data
+      const match = agentPresets.find((a) => a.id === data.agentId)
+      if (match) setAgent(match)
+
+      if (data.messages && data.messages.length > 0) {
+        const next = data.messages.map((m) => ({
+          id: m.id || uid(),
+          role: m.role,
+          type: m.type,
+          content: m.text,
+          timestamp: new Date(m.createdAt),
+          agentId: data.agentId,
+        }))
+        setMessages(next)
       }
 
-      const newId = data.cursor_agent_id!
-      setCursorAgentId(newId)
-      setAgentStatus(data.status)
-      cachePersona(newId, agent.id)
-
-      startPolling(newId)
-    } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: uid(),
-          role: 'agent',
-          content: `Error: ${err instanceof Error ? err.message : 'Something went wrong'}`,
-          timestamp: new Date(),
-          agentId: agent.id,
-        },
+      setLoading(false)
+    } catch {
+      setMessages([
+        { id: uid(), role: 'assistant', content: 'Failed to load conversation.', timestamp: new Date(), agentId: agent.id },
       ])
       setLoading(false)
     }
   }
 
   function handleClear() {
-    if (pollingRef.current) clearInterval(pollingRef.current)
-    pollingRef.current = null
-    lastServerMessagesSigRef.current = ''
-    setHistoryTruncated(null)
+    abortRef.current?.abort()
+    abortRef.current = null
+    setStreamingMsgId(null)
     setMessages([])
-    setCursorAgentId(null)
-    setAgentStatus(null)
+    setConversationId(null)
     setLoading(false)
   }
 
-  async function handleStop() {
-    if (cursorAgentId) {
-      await stopAgent(cursorAgentId)
-    }
-    if (pollingRef.current) clearInterval(pollingRef.current)
-    pollingRef.current = null
+  function handleStop() {
+    abortRef.current?.abort()
+    abortRef.current = null
+    setStreamingMsgId(null)
     setLoading(false)
-    setAgentStatus('STOPPED')
-    setCursorAgentId(null)
   }
 
   const hasMessages = messages.length > 0
-  const isRunning = agentStatus === 'RUNNING' || agentStatus === 'CREATING'
-  const isEnded = agentStatus === 'STOPPED' || agentStatus === 'ERRORED' || agentStatus === 'TIMEOUT'
+  const isStreaming = loading && loadingReason === 'thinking'
   const inputDisabled = loading
-
-  const statusLabel: Record<string, string> = {
-    STOPPED: 'Agent was stopped.',
-    ERRORED: 'Agent encountered an error.',
-    TIMEOUT: 'Agent timed out.',
-  }
 
   return (
     <div className="h-[100dvh] flex flex-row">
       <AgentSidebar
         open={mobileSidebar}
         onClose={() => setMobileSidebar(false)}
-        activeId={cursorAgentId}
+        activeId={conversationId}
         selectedAgent={agent}
         onSelectAgent={setAgent}
-        onSelectHistory={handleSelectAgent}
+        onSelectHistory={handleSelectConversation}
         onNew={handleClear}
         onLogout={onLogout}
-        isRunning={isRunning}
+        isRunning={isStreaming}
         onStop={handleStop}
+        refreshKey={sidebarRefresh}
       />
 
       <div className="flex-1 flex flex-col min-w-0 bg-bg">
-        {/* Top bar — safe area for notch/Dynamic Island */}
+        {/* Top bar */}
         <header className="flex-shrink-0 border-b border-border px-4 md:px-6 pt-[max(0.625rem,env(safe-area-inset-top))] pb-2.5 flex items-center gap-3">
-          {/* Mobile hamburger */}
           <button
             onClick={() => setMobileSidebar(true)}
             className="md:hidden text-text-muted hover:text-text p-1 -ml-1 rounded hover:bg-white/5 transition-colors cursor-pointer"
@@ -294,20 +244,18 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
             </svg>
           </button>
           <div className={`w-2 h-2 rounded-full ${
-            isRunning ? 'bg-blue-400 animate-pulse' :
-            isEnded ? 'bg-red-400' :
-            cursorAgentId ? 'bg-green-500' : 'bg-neutral-600'
+            isStreaming ? 'bg-blue-400 animate-pulse' :
+            conversationId ? 'bg-green-500' : 'bg-neutral-600'
           }`} />
           <span className="text-[13px] text-text-secondary truncate">
             {agent.label}
-            {isRunning && (
-              <span className="text-blue-400/70 text-[11px] ml-1.5">working...</span>
+            {isStreaming && (
+              <span className="text-blue-400/70 text-[11px] ml-1.5">streaming...</span>
             )}
           </span>
         </header>
 
         {!hasMessages && !loading ? (
-          /* Empty state — hero + input as one connected unit */
           <div className="flex-1 flex flex-col min-h-0">
             <div className="flex-1" />
             <div className="px-4 md:px-6 pb-2">
@@ -315,7 +263,7 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
                 <div className="text-4xl mb-3">{agent.avatar}</div>
                 <h2 className="text-lg font-medium text-text mb-1">{agent.label}</h2>
                 <p className="text-sm text-text-secondary leading-relaxed">
-                  {agent.description}. Send a prompt to launch a cloud agent.
+                  {agent.description}. Send a prompt to start a conversation.
                 </p>
               </div>
               <div className="max-w-3xl mx-auto pb-[env(safe-area-inset-bottom)]">
@@ -326,46 +274,25 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
           </div>
         ) : (
           <>
-            {/* Message list */}
             <main className="flex-1 overflow-y-auto min-h-0">
               <div className="max-w-3xl mx-auto px-4 md:px-6 pt-5 pb-4 md:py-6 flex flex-col gap-5 md:gap-6">
-                {historyTruncated && (
-                  <div className="text-[11px] text-text-muted text-center px-3 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.06] mx-auto w-fit">
-                    Showing latest — {historyTruncated.total} total messages
-                  </div>
-                )}
                 {messages.map((msg) => (
-                  <MessageBubble key={msg.id} message={msg} />
+                  <MessageBubble
+                    key={msg.id}
+                    message={msg}
+                    streaming={msg.id === streamingMsgId}
+                  />
                 ))}
-                {loading && (
-                  <TypingIndicator label={loadingReason === 'history' ? 'Loading conversation' : 'Agent is thinking'} />
+                {loading && loadingReason === 'thinking' && !messages.some((m) => m.id === streamingMsgId) && (
+                  <TypingIndicator label="Agent is thinking" />
                 )}
-
-                {isEnded && (
-                  <div className="flex flex-col items-center gap-3 py-6">
-                    <div className="flex items-center gap-2 text-[13px] text-text-secondary">
-                      <div className={`w-2 h-2 rounded-full ${agentStatus === 'ERRORED' ? 'bg-red-400' : 'bg-neutral-500'}`} />
-                      <span>{statusLabel[agentStatus!] ?? 'Conversation ended.'}</span>
-                    </div>
-                    <button
-                      onClick={handleClear}
-                      className="
-                        px-5 py-2 rounded-full text-[13px] font-medium
-                        bg-white/[0.08] text-text-secondary hover:text-text hover:bg-white/[0.12]
-                        border border-white/[0.06]
-                        transition-all duration-200 cursor-pointer
-                      "
-                    >
-                      New Conversation
-                    </button>
-                  </div>
+                {loading && loadingReason === 'history' && (
+                  <TypingIndicator label="Loading conversation" />
                 )}
-
                 <div ref={bottomRef} />
               </div>
             </main>
 
-            {/* Input bar — pinned, with frosted glass */}
             <footer className="flex-shrink-0 bg-bg/80 backdrop-blur-xl border-t border-white/[0.06] pb-[env(safe-area-inset-bottom)]">
               <div className="max-w-3xl mx-auto px-4 md:px-6 py-2">
                 <ChatInput onSend={handleSend} disabled={inputDisabled} />

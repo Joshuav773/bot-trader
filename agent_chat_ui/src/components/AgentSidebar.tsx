@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
-import type { AgentListItem } from '../api'
+import type { ConversationListItem } from '../api'
 import type { Agent } from '../types'
-import { listAgents } from '../api'
+import { listConversations } from '../api'
 import { agents as agentPresets } from '../agents'
 
 interface Props {
@@ -15,6 +15,7 @@ interface Props {
   onLogout: () => void
   isRunning: boolean
   onStop: () => void
+  refreshKey?: number
 }
 
 function timeAgo(iso: string): string {
@@ -28,13 +29,13 @@ function timeAgo(iso: string): string {
   return `${days}d ago`
 }
 
-function groupByTime(items: AgentListItem[]): { label: string; agents: AgentListItem[] }[] {
+function groupByTime(items: ConversationListItem[]): { label: string; agents: ConversationListItem[] }[] {
   const now = Date.now()
   const dayMs = 86400000
   const todayStart = new Date()
   todayStart.setHours(0, 0, 0, 0)
 
-  const groups: { label: string; agents: AgentListItem[] }[] = [
+  const groups: { label: string; agents: ConversationListItem[] }[] = [
     { label: 'Today', agents: [] },
     { label: 'This Week', agents: [] },
     { label: 'This Month', agents: [] },
@@ -58,11 +59,9 @@ function groupByTime(items: AgentListItem[]): { label: string; agents: AgentList
 }
 
 const STATUS_DOT: Record<string, string> = {
-  RUNNING: 'bg-blue-400 animate-pulse',
-  CREATING: 'bg-blue-400 animate-pulse',
-  FINISHED: 'bg-green-500',
-  STOPPED: 'bg-neutral-500',
-  ERRORED: 'bg-red-400',
+  streaming: 'bg-blue-400 animate-pulse',
+  error: 'bg-red-400',
+  idle: 'bg-green-500',
 }
 
 export default function AgentSidebar({
@@ -76,17 +75,19 @@ export default function AgentSidebar({
   onLogout,
   isRunning,
   onStop,
+  refreshKey,
 }: Props) {
-  const [agents, setAgents] = useState<AgentListItem[]>([])
+  const [agents, setAgents] = useState<ConversationListItem[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    setLoading(true)
-    listAgents()
-      .then(setAgents)
-      .catch(() => setAgents([]))
-      .finally(() => setLoading(false))
-  }, [])
+    let cancelled = false
+    listConversations()
+      .then((data) => { if (!cancelled) setAgents(data) })
+      .catch(() => { if (!cancelled) setAgents([]) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [refreshKey])
 
   const groups = groupByTime(agents)
 
@@ -105,7 +106,7 @@ export default function AgentSidebar({
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
             <path d="M8 3v10M3 8h10" />
           </svg>
-          New Agent
+          New Conversation
         </button>
       </div>
 
@@ -141,7 +142,7 @@ export default function AgentSidebar({
         )}
 
         {!loading && agents.length === 0 && (
-          <div className="px-4 py-6 text-[12px] text-text-muted text-center">No recent agents</div>
+          <div className="px-4 py-6 text-[12px] text-text-muted text-center">No recent conversations</div>
         )}
 
         {groups.map((group) => (
@@ -151,9 +152,9 @@ export default function AgentSidebar({
             </div>
             {group.agents.map((a) => {
               const isActive = a.id === activeId
-              const label = a.name || a.summary?.slice(0, 40) || 'Untitled agent'
+              const label = a.title || 'Untitled conversation'
               const dotClass = STATUS_DOT[a.status] ?? 'bg-neutral-600'
-              const persona = agentPresets.find((p) => p.id === a.persona)
+              const persona = agentPresets.find((p) => p.id === a.agentId)
 
               return (
                 <button
@@ -174,7 +175,7 @@ export default function AgentSidebar({
                     ) : (
                       <div className={`w-2 h-2 rounded-full ${dotClass}`} />
                     )}
-                    {persona && (a.status === 'RUNNING' || a.status === 'CREATING' || a.status === 'ERRORED') && (
+                    {persona && (a.status === 'streaming' || a.status === 'error') && (
                       <span className={`absolute -top-0.5 -right-0.5 w-[7px] h-[7px] rounded-full ring-2 ring-[#1a1a1a] ${dotClass}`} />
                     )}
                   </span>
@@ -194,7 +195,7 @@ export default function AgentSidebar({
             onClick={onStop}
             className="text-[11px] text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-white/5 transition-colors cursor-pointer"
           >
-            Stop Agent
+            Stop
           </button>
         ) : (
           <span className="text-[10px] text-text-muted">Agent Command</span>

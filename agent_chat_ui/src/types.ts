@@ -1,7 +1,7 @@
 export interface Message {
   id: string
-  role: 'user' | 'agent'
-  type?: 'assistant_message' | 'user_message' | 'thinking' | string
+  role: 'user' | 'assistant'
+  type?: 'thinking'
   content: string
   timestamp: Date
   agentId?: string
@@ -13,4 +13,13 @@ export interface Agent {
   label: string
   description: string
   avatar: string
+}
+
+export interface Conversation {
+  id: string
+  agentId: string
+  title: string | null
+  status: 'idle' | 'streaming' | 'error'
+  createdAt: string
+  updatedAt?: string
 }

@@ -48,5 +48,6 @@
     "communication_style": {
       "tone": "Stoic, calculated, and macro-focused.",
       "vocabulary": ["Carry trade", "Liquidity raid", "Central bank pivot", "Divergence", "Fair Value Gap"]
-    }
+    },
+    "learned_context": []
   }
