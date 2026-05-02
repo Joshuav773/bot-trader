@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, memo } from 'react'
 import Markdown from 'react-markdown'
 import type { Message } from '../types'
 import { agents } from '../agents'
@@ -8,7 +8,7 @@ interface Props {
   streaming?: boolean
 }
 
-export default function MessageBubble({ message, streaming }: Props) {
+function MessageBubbleInner({ message, streaming }: Props) {
   const isUser = message.role === 'user'
   const isThinking = message.type === 'thinking'
   const agent = agents.find((a) => a.id === message.agentId)
@@ -76,6 +76,18 @@ export default function MessageBubble({ message, streaming }: Props) {
     </div>
   )
 }
+
+// Skip re-renders when content/streaming/agentId haven't changed.
+// Critical: stops every prior message from re-rendering on every new token.
+const MessageBubble = memo(MessageBubbleInner, (prev, next) =>
+  prev.streaming === next.streaming &&
+  prev.message.id === next.message.id &&
+  prev.message.content === next.message.content &&
+  prev.message.agentId === next.message.agentId &&
+  prev.message.type === next.message.type,
+)
+
+export default MessageBubble
 
 function ThinkingBlock({ content, agentLabel }: { content: string; agentLabel?: string }) {
   const [expanded, setExpanded] = useState(false)

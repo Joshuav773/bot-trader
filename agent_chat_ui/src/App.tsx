@@ -33,21 +33,35 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
   const [mobileSidebar, setMobileSidebar] = useState(false)
   const [sidebarRefresh, setSidebarRefresh] = useState(0)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   // Tracks the streaming assistant message being built token-by-token
   const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null)
   // Track if onDone has already fired for the current stream
   const doneRef = useRef(false)
+  // rAF token buffers — coalesce many tokens into a single state update per frame
+  const textBufferRef = useRef('')
+  const thinkingBufferRef = useRef('')
+  const flushFrameRef = useRef<number | null>(null)
 
-  const scrollToBottom = useCallback(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  // Auto-scroll only when user is already near the bottom — don't fight them when reading
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    if (distanceFromBottom < 200) {
+      bottomRef.current?.scrollIntoView({ behavior })
+    }
   }, [])
 
-  useEffect(scrollToBottom, [messages, loading, scrollToBottom])
+  useEffect(() => { scrollToBottom() }, [messages, loading, scrollToBottom])
 
-  // Cleanup abort on unmount
+  // Cleanup abort + any pending rAF on unmount
   useEffect(() => {
-    return () => { abortRef.current?.abort() }
+    return () => {
+      abortRef.current?.abort()
+      if (flushFrameRef.current !== null) cancelAnimationFrame(flushFrameRef.current)
+    }
   }, [])
 
   function handleSend(text: string) {
@@ -73,6 +87,70 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
     const assistantMsgId = uid()
     setStreamingMsgId(assistantMsgId)
     let thinkingMsgId: string | null = null
+    textBufferRef.current = ''
+    thinkingBufferRef.current = ''
+
+    // Flush buffered tokens into state — runs once per animation frame max
+    const flush = () => {
+      flushFrameRef.current = null
+      const textChunk = textBufferRef.current
+      const thinkingChunk = thinkingBufferRef.current
+      textBufferRef.current = ''
+      thinkingBufferRef.current = ''
+
+      if (!textChunk && !thinkingChunk) return
+
+      setMessages((prev) => {
+        let next = prev
+        if (textChunk) {
+          const existing = next.find((m) => m.id === assistantMsgId)
+          if (existing) {
+            next = next.map((m) =>
+              m.id === assistantMsgId ? { ...m, content: m.content + textChunk } : m,
+            )
+          } else {
+            next = [
+              ...next,
+              {
+                id: assistantMsgId,
+                role: 'assistant' as const,
+                content: textChunk,
+                timestamp: new Date(),
+                agentId: agent.id,
+              },
+            ]
+          }
+        }
+        if (thinkingChunk) {
+          if (!thinkingMsgId) {
+            thinkingMsgId = uid()
+            next = [
+              ...next,
+              {
+                id: thinkingMsgId,
+                role: 'assistant' as const,
+                type: 'thinking' as const,
+                content: thinkingChunk,
+                timestamp: new Date(),
+                agentId: agent.id,
+              },
+            ]
+          } else {
+            const id = thinkingMsgId
+            next = next.map((m) =>
+              m.id === id ? { ...m, content: m.content + thinkingChunk } : m,
+            )
+          }
+        }
+        return next
+      })
+    }
+
+    const scheduleFlush = () => {
+      if (flushFrameRef.current === null) {
+        flushFrameRef.current = requestAnimationFrame(flush)
+      }
+    }
 
     streamChat(conversationId, text, agent.id, {
       onConversationId: (id, agentId) => {
@@ -84,47 +162,12 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
         }
       },
       onToken: (token) => {
-        setMessages((prev) => {
-          const existing = prev.find((m) => m.id === assistantMsgId)
-          if (existing) {
-            return prev.map((m) =>
-              m.id === assistantMsgId ? { ...m, content: m.content + token } : m,
-            )
-          }
-          // First token — create the assistant message
-          return [
-            ...prev,
-            {
-              id: assistantMsgId,
-              role: 'assistant' as const,
-              content: token,
-              timestamp: new Date(),
-              agentId: agent.id,
-            },
-          ]
-        })
+        textBufferRef.current += token
+        scheduleFlush()
       },
       onThinking: (token) => {
-        if (!thinkingMsgId) {
-          thinkingMsgId = uid()
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: thinkingMsgId!,
-              role: 'assistant' as const,
-              type: 'thinking' as const,
-              content: token,
-              timestamp: new Date(),
-              agentId: agent.id,
-            },
-          ])
-        } else {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === thinkingMsgId ? { ...m, content: m.content + token } : m,
-            ),
-          )
-        }
+        thinkingBufferRef.current += token
+        scheduleFlush()
       },
       onToolUse: () => {
         // Could show tool activity in UI — for now just keep loading state
@@ -135,6 +178,8 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
       onDone: () => {
         if (doneRef.current) return
         doneRef.current = true
+        // Flush any tokens still buffered when stream ends
+        if (textBufferRef.current || thinkingBufferRef.current) flush()
         setStreamingMsgId(null)
         setLoading(false)
         setSidebarRefresh((n) => n + 1)
@@ -142,6 +187,7 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
       onError: (err) => {
         if (doneRef.current) return
         doneRef.current = true
+        if (textBufferRef.current || thinkingBufferRef.current) flush()
         setStreamingMsgId(null)
         setMessages((prev) => [
           ...prev,
@@ -274,7 +320,7 @@ function ChatApp({ onLogout }: { onLogout: () => void }) {
           </div>
         ) : (
           <>
-            <main className="flex-1 overflow-y-auto min-h-0">
+            <main ref={scrollContainerRef} className="flex-1 overflow-y-auto min-h-0">
               <div className="max-w-3xl mx-auto px-4 md:px-6 pt-5 pb-4 md:py-6 flex flex-col gap-5 md:gap-6">
                 {messages.map((msg) => (
                   <MessageBubble

@@ -5,6 +5,7 @@ import { resolve } from 'path'
 import { readFileSync, readdirSync, existsSync } from 'fs'
 import type { Session, DisplayMessage } from './sessions.js'
 import { saveSession } from './sessions.js'
+import { getAlpacaTools, executeAlpacaTool } from './alpaca.js'
 
 config({ path: resolve(process.cwd(), '.env.local') })
 config({ path: resolve(process.cwd(), '../.env') })
@@ -99,11 +100,32 @@ export function buildSystemPrompt(agentId: string): string {
   const cfg = AGENT_CONFIG[agentId] ?? AGENT_CONFIG['options-trader']
   const personaJson = loadPersonaJson(agentId)
   const contextFiles = loadContextFiles(agentId)
+  const hasAlpaca = agentId === 'options-trader' && !!process.env.ALPACA_API_KEY && !!process.env.ALPACA_SECRET_KEY
 
   const contextSection = contextFiles.length
     ? `\n<context_files>\n${contextFiles
         .map((f) => `<file path="agents/${agentId}/context/${f.name}">\n${f.content}\n</file>`)
         .join('\n\n')}\n</context_files>\n\nThe files above contain your protocols, learned behaviors, ledgers, and operational context. Use them on every response — they define how you think and respond. Update them as you learn new things.\n`
+    : ''
+
+  const alpacaSection = hasAlpaca
+    ? `
+## Trade Execution (Alpaca Paper)
+
+You have access to Alpaca paper-trading tools (\`alpaca_get_account\`, \`alpaca_get_positions\`, \`alpaca_get_quote\`, \`alpaca_get_bars\`, \`alpaca_get_option_chain\`, \`alpaca_place_order\`, \`alpaca_cancel_order\`, \`alpaca_close_position\`).
+
+**HARD RULE**: You must never call \`alpaca_place_order\` without **explicit user confirmation** of the trade ticket. The flow is always:
+1. Analyze using your full framework
+2. Propose the trade in plain text using the template in \`EXECUTION_PROTOCOL.md\`
+3. Wait for the user to say yes / approve / go / place it
+4. Only then call \`alpaca_place_order\`
+
+Read-only tools (\`alpaca_get_*\`) can be called freely whenever you need real account state for an analysis — that's encouraged.
+
+Risk management is enforced both by you (in the proposal) and by the tool layer (rejects stock entries without stop_loss_price + take_profit_price). Always include both.
+
+This is paper money. Treat it like real money. The discipline you build now is the discipline you carry to live.
+`
     : ''
 
   return `You are ${cfg.label}.
@@ -113,7 +135,7 @@ Below is your full persona definition. Follow the system_prompt, analytical_fram
 <persona>
 ${personaJson}
 </persona>
-${contextSection}
+${contextSection}${alpacaSection}
 You have access to GitHub tools that let you read files, search code, create branches, update files, and create pull requests in the repository.
 
 ## Self-Evolution
@@ -219,82 +241,130 @@ export async function* runAgentLoop(
   const model = process.env.CLAUDE_MODEL || DEFAULT_MODEL
   const mcpServers = getMcpServers()
   const mcpTools = getMcpTools()
+  const alpacaTools = getAlpacaTools(session.agentId)
+  const alpacaToolNames = new Set((alpacaTools ?? []).map((t) => t.name))
 
-  // Collect the full response from streaming
+  // Tools we ship to Claude on every iteration. MCP toolsets are auto-executed by
+  // the API; native (Alpaca) tools come back as tool_use blocks we execute ourselves.
+  const allTools: Anthropic.Beta.BetaToolUnion[] = [
+    ...((alpacaTools as unknown as Anthropic.Beta.BetaToolUnion[]) ?? []),
+    ...(mcpTools ?? []),
+  ]
+  const useBeta = mcpServers !== undefined
+
+  // Aggregate text/thinking across all iterations of the tool loop
   let fullText = ''
   let thinkingText = ''
 
-  try {
-    // Build request params — use beta endpoint when MCP servers are configured
-    const baseParams = {
-      model,
-      max_tokens: 16000,
-      system: systemPrompt,
-      messages: session.messages,
+  const baseParams = {
+    model,
+    max_tokens: 16000,
+    system: systemPrompt,
+  }
+
+  const MAX_ITERATIONS = 8
+
+  for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+    if (signal?.aborted) {
+      yield { type: 'done', data: { status: 'stopped' } }
+      return
     }
 
-    if (mcpServers) {
-      // Beta endpoint with MCP — tool execution is automatic
-      const betaStream = client().beta.messages.stream({
-        ...baseParams,
-        mcp_servers: mcpServers,
-        tools: mcpTools,
-        betas: ['mcp-client-2025-11-20'],
-      })
+    // Collect native tool_use blocks as they stream in (we'll execute them after stream end)
+    const pendingToolUses: { id: string; name: string; input: Record<string, unknown> }[] = []
+    let activeTool: { id: string; name: string; jsonBuffer: string } | null = null
+    let stopReason: string | null = null
+    let assistantContent: unknown[] = []
 
-      for await (const event of betaStream) {
+    try {
+      const stream = useBeta
+        ? client().beta.messages.stream({
+            ...baseParams,
+            messages: session.messages,
+            mcp_servers: mcpServers,
+            tools: allTools.length ? allTools : undefined,
+            betas: ['mcp-client-2025-11-20'],
+          })
+        : client().messages.stream({
+            ...baseParams,
+            messages: session.messages,
+            tools: alpacaTools && alpacaTools.length ? alpacaTools : undefined,
+          })
+
+      for await (const event of stream) {
         if (signal?.aborted) {
-          betaStream.abort()
+          stream.abort()
           yield { type: 'done', data: { status: 'stopped' } }
           return
         }
-        if (event.type === 'content_block_delta') {
-          if ('text' in event.delta && event.delta.type === 'text_delta') {
-            fullText += event.delta.text
-            yield { type: 'text_delta', data: { text: event.delta.text } }
-          } else if ('thinking' in event.delta && event.delta.type === 'thinking_delta') {
-            thinkingText += event.delta.thinking
-            yield { type: 'thinking_delta', data: { text: event.delta.thinking } }
+
+        if (event.type === 'content_block_start') {
+          const block = event.content_block as { type: string; id?: string; name?: string; server_name?: string }
+          if (block.type === 'tool_use' && block.id && block.name && alpacaToolNames.has(block.name)) {
+            activeTool = { id: block.id, name: block.name, jsonBuffer: '' }
+          } else if (block.type === 'mcp_tool_use' && block.name) {
+            // Surface MCP tool calls for UI visibility (they execute server-side)
+            yield { type: 'tool_use', data: { tool: block.name, server: block.server_name ?? 'mcp' } }
           }
-        } else if (event.type === 'content_block_start') {
-          if (event.content_block.type === 'mcp_tool_use') {
-            yield { type: 'tool_use', data: { tool: event.content_block.name, server: event.content_block.server_name } }
+        } else if (event.type === 'content_block_delta') {
+          const delta = event.delta as { type: string; text?: string; thinking?: string; partial_json?: string }
+          if (delta.type === 'text_delta' && delta.text) {
+            fullText += delta.text
+            yield { type: 'text_delta', data: { text: delta.text } }
+          } else if (delta.type === 'thinking_delta' && delta.thinking) {
+            thinkingText += delta.thinking
+            yield { type: 'thinking_delta', data: { text: delta.thinking } }
+          } else if (delta.type === 'input_json_delta' && delta.partial_json && activeTool) {
+            activeTool.jsonBuffer += delta.partial_json
+          }
+        } else if (event.type === 'content_block_stop') {
+          if (activeTool) {
+            let input: Record<string, unknown> = {}
+            try {
+              input = activeTool.jsonBuffer ? JSON.parse(activeTool.jsonBuffer) : {}
+            } catch {
+              input = {}
+            }
+            pendingToolUses.push({ id: activeTool.id, name: activeTool.name, input })
+            activeTool = null
           }
         }
       }
 
-      const finalMessage = await betaStream.finalMessage()
-      // Beta content blocks include MCP types that don't fit standard MessageParam — cast through unknown
-      session.messages.push({ role: 'assistant', content: finalMessage.content as unknown as Anthropic.ContentBlockParam[] })
-    } else {
-      // Standard endpoint without MCP
-      const stdStream = client().messages.stream(baseParams)
-
-      for await (const event of stdStream) {
-        if (signal?.aborted) {
-          stdStream.abort()
-          yield { type: 'done', data: { status: 'stopped' } }
-          return
-        }
-        if (event.type === 'content_block_delta') {
-          if ('text' in event.delta && event.delta.type === 'text_delta') {
-            fullText += event.delta.text
-            yield { type: 'text_delta', data: { text: event.delta.text } }
-          } else if ('thinking' in event.delta && event.delta.type === 'thinking_delta') {
-            thinkingText += event.delta.thinking
-            yield { type: 'thinking_delta', data: { text: event.delta.thinking } }
-          }
-        }
-      }
-
-      const finalMessage = await stdStream.finalMessage()
-      session.messages.push({ role: 'assistant', content: finalMessage.content as Anthropic.ContentBlock[] })
+      const finalMessage = await stream.finalMessage()
+      stopReason = finalMessage.stop_reason
+      assistantContent = finalMessage.content as unknown[]
+    } catch (err) {
+      const message = friendlyError(err)
+      yield { type: 'error', data: { message } }
+      return
     }
 
-  } catch (err) {
-    const message = friendlyError(err)
-    yield { type: 'error', data: { message } }
-    return
+    // Persist the assistant turn so the next iteration sees it as part of the conversation
+    session.messages.push({ role: 'assistant', content: assistantContent as Anthropic.ContentBlockParam[] })
+
+    // If Claude wants to use a native (Alpaca) tool, execute it and feed the result back
+    if (stopReason === 'tool_use' && pendingToolUses.length > 0) {
+      const toolResults: Anthropic.ToolResultBlockParam[] = []
+      for (const tu of pendingToolUses) {
+        yield { type: 'tool_use', data: { tool: tu.name, input: tu.input } }
+        const result = await executeAlpacaTool(tu.name, tu.input)
+        const preview = result.content.length > 240 ? result.content.slice(0, 240) + '...' : result.content
+        yield { type: 'tool_result', data: { tool: tu.name, result: preview, is_error: result.is_error } }
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: tu.id,
+          content: result.content,
+          ...(result.is_error ? { is_error: true } : {}),
+        })
+      }
+      session.messages.push({ role: 'user', content: toolResults })
+      saveSession(session)
+      continue // loop again so Claude can react to the tool results
+    }
+
+    // No native tools to execute — we're done with the loop
+    break
   }
 
   // Add thinking to display messages if present
