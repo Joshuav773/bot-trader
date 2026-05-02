@@ -55,6 +55,27 @@ agents/
 - `agent_chat_ui/src/App.tsx` — Main React app with SSE streaming (no more polling)
 - `agent_chat_ui/src/api.ts` — Frontend API client with `streamChat`, `listConversations`, `getConversation`
 
+## Trade Execution (Alpaca Paper)
+
+The Options Analyst can place paper-trading orders against an Alpaca account using native Claude tools defined in `agent_chat_ui/api/_lib/alpaca.ts`. **The flow requires explicit user confirmation** — Claude proposes a trade ticket (entry/stop/target/qty/conviction), and only places it when the user approves.
+
+### Hard guardrails
+- **Paper-only**: `alpaca.ts` throws at module init if `ALPACA_BASE_URL` isn't the paper endpoint.
+- **Stocks must have stop + target**: bracket orders are submitted automatically; the tool rejects stock buys without both.
+- **Confirmation required**: the system prompt forbids `alpaca_place_order` without explicit user "yes / place it / approved" approval.
+
+Position sizing is governed by [`agents/options-trader/context/EXECUTION_PROTOCOL.md`](agents/options-trader/context/EXECUTION_PROTOCOL.md), not by a hardcoded cap. The Alpaca account's buying power is the real ceiling.
+
+### Tool surface
+- Read-only (called freely): `alpaca_get_account`, `alpaca_get_positions`, `alpaca_get_orders`, `alpaca_get_quote`, `alpaca_get_bars`, `alpaca_get_option_chain`
+- Mutating (require confirmation): `alpaca_place_order`, `alpaca_cancel_order`, `alpaca_close_position`
+
+### Per-agent gating
+Only `options-trader` gets Alpaca tools. The Forex Analyst stays analysis-only (Alpaca doesn't trade FX).
+
+### Trade journal
+Claude updates `agents/options-trader/context/ACCOUNT_LEDGER.md` via the GitHub MCP after every fill — see `EXECUTION_PROTOCOL.md` in the same folder for the full ruleset.
+
 ## Environment Variables
 - `ANTHROPIC_API_KEY` — Claude API key
 - `GITHUB_MCP_URL` — GitHub MCP server endpoint (`https://api.githubcopilot.com/mcp`). If unset, chat runs without GitHub tools.
@@ -63,6 +84,8 @@ agents/
 - `AGENT_CHAT_API_KEY` — Frontend auth key
 - `GITHUB_REPO_URL` — Target repo URL (where Claude writes persona/context updates)
 - `GITHUB_REPO_REF` — Target branch (default: `main`)
+- `ALPACA_API_KEY`, `ALPACA_SECRET_KEY` — Alpaca paper account credentials (omit to disable trading tools)
+- `ALPACA_BASE_URL` — Must be `https://paper-api.alpaca.markets` (anything else is rejected)
 
 ## Commands
 - `cd agent_chat_ui && npm run dev` — Vite dev server (frontend only, API routes won't work)
